@@ -1,9 +1,8 @@
-pub mod message;
-pub mod command;
 pub mod channel;
+pub mod command;
 pub mod connection;
+pub mod message;
 pub mod types;
-
 
 pub fn enable_logging() {
     if std::env::var_os("RUST_LOG").is_none() {

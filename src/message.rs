@@ -2,10 +2,13 @@ use core::str;
 
 use crate::types::{Command, Message, Source, Tag, TagKey};
 
-
 impl Message {
     pub fn new(tags: Option<Vec<Tag>>, source: Option<Source>, command: Command) -> Self {
-        return Message { tags, source, command }
+        return Message {
+            tags,
+            source,
+            command,
+        };
     }
 
     pub fn to_bytes(self) -> String {
@@ -54,7 +57,7 @@ impl Message {
         }
         output.push_str("\r\n");
 
-        return output
+        return output;
     }
 
     pub fn from_bytes<'a>(src: &'a [u8]) -> Option<Message> {
@@ -65,7 +68,11 @@ impl Message {
             Err(_) => return None,
         };
 
-        let mut message: Message = Message { tags: None, source: None, command: Command::UNKNOWN };
+        let mut message: Message = Message {
+            tags: None,
+            source: None,
+            command: Command::UNKNOWN,
+        };
 
         if input.starts_with('@') {
             if let Some(space_pos) = input.find(' ') {
@@ -73,7 +80,7 @@ impl Message {
                     Ok(tags) => message.tags = Some(tags),
                     Err(_) => return None,
                 };
-                input = &input[space_pos+1..]
+                input = &input[space_pos + 1..]
             } else {
                 return None;
             }
@@ -85,7 +92,7 @@ impl Message {
                     Ok(source) => message.source = Some(source),
                     Err(_) => return None,
                 };
-                input = &input[space_pos+1..]
+                input = &input[space_pos + 1..]
             } else {
                 return None;
             }
@@ -93,7 +100,10 @@ impl Message {
 
         if let Some((command, params_input)) = input.split_once(' ') {
             if let Some((middle, trailing)) = params_input.split_once(" :") {
-                let mut params = middle.split(' ').map(|s| s.to_string()).collect::<Vec<String>>();
+                let mut params = middle
+                    .split(' ')
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>();
                 params.push(trailing.to_string());
                 message.command = Command::new(command, params)
             } else {
@@ -102,7 +112,7 @@ impl Message {
                     params_input
                         .split(' ')
                         .map(|s| s.to_string())
-                        .collect::<Vec<String>>()
+                        .collect::<Vec<String>>(),
                 );
             }
         } else {
@@ -124,16 +134,22 @@ impl Message {
             tags.push(Message::parse_tag(tag_input)?);
         }
 
-        return Ok(tags)
+        return Ok(tags);
     }
 
     fn parse_tag(input: &str) -> Result<Tag, ()> {
         // <tag>           ::= <key> ['=' <escaped value>]
 
         if let Some((key, value)) = input.split_once('=') {
-            return Ok(Tag{ key: Message::parse_key(key)?, value: Some(value.to_string()) });
+            return Ok(Tag {
+                key: Message::parse_key(key)?,
+                value: Some(value.to_string()),
+            });
         } else {
-            return Ok(Tag{ key: Message::parse_key(input)?, value: None})
+            return Ok(Tag {
+                key: Message::parse_key(input)?,
+                value: None,
+            });
         }
     }
 
@@ -143,7 +159,11 @@ impl Message {
         // <escaped value> ::= <sequence of any characters except NUL, CR, LF, semicolon (`;`) and SPACE>
         // <vendor>        ::= <host>
 
-        let mut key: TagKey = TagKey { client_prefix: None, vendor: None, value: String::new() };
+        let mut key: TagKey = TagKey {
+            client_prefix: None,
+            vendor: None,
+            value: String::new(),
+        };
         let mut mut_input = input;
 
         if input.starts_with('+') {
@@ -154,7 +174,6 @@ impl Message {
         if let Some((vendor, value)) = mut_input.split_once('=') {
             key.vendor = Some(vendor.to_string());
             key.value = value.to_string();
-
         } else {
             key.value = mut_input.to_string();
         }
@@ -168,15 +187,31 @@ impl Message {
 
         if let Some((rest, host)) = input.split_once('@') {
             if let Some((name, user)) = rest.split_once('!') {
-                return Ok(Source { name: name.to_string(), user: Some(user.to_string()), host: Some(host.to_string()) });
+                return Ok(Source {
+                    name: name.to_string(),
+                    user: Some(user.to_string()),
+                    host: Some(host.to_string()),
+                });
             } else {
-                return Ok(Source { name: rest.to_string(), user: None, host: Some(host.to_string()) });
+                return Ok(Source {
+                    name: rest.to_string(),
+                    user: None,
+                    host: Some(host.to_string()),
+                });
             }
         } else {
             if let Some((name, user)) = input.split_once('!') {
-                return Ok(Source { name: name.to_string(), user: Some(user.to_string()), host: None });
+                return Ok(Source {
+                    name: name.to_string(),
+                    user: Some(user.to_string()),
+                    host: None,
+                });
             } else {
-                return Ok(Source { name: input.to_string(), user: None, host: None });
+                return Ok(Source {
+                    name: input.to_string(),
+                    user: None,
+                    host: None,
+                });
             }
         }
     }
@@ -188,14 +223,25 @@ mod tests {
 
     #[test]
     fn test1() {
-        let message: Message = Message::from_bytes("@id=234AB :dan!d@localhost PRIVMSG #chan :Hey what's up!".as_bytes()).unwrap();
-        assert_eq!("@id=234AB :dan!d@localhost PRIVMSG #chan :Hey what's up!\r\n", message.to_bytes());
+        let message: Message = Message::from_bytes(
+            "@id=234AB :dan!d@localhost PRIVMSG #chan :Hey what's up!".as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            "@id=234AB :dan!d@localhost PRIVMSG #chan :Hey what's up!\r\n",
+            message.to_bytes()
+        );
     }
 
     #[test]
     fn test2() {
-        let message: Message = Message::from_bytes(":irc.example.com CAP REQ :multi-prefix extended-join sasl".as_bytes()).unwrap();
-        assert_eq!(":irc.example.com CAP REQ :multi-prefix extended-join sasl\r\n", message.to_bytes());
+        let message: Message = Message::from_bytes(
+            ":irc.example.com CAP REQ :multi-prefix extended-join sasl".as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            ":irc.example.com CAP REQ :multi-prefix extended-join sasl\r\n",
+            message.to_bytes()
+        );
     }
-
 }
