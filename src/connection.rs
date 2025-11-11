@@ -1,146 +1,114 @@
-use std::io::Cursor;
+use crate::error::ConnectionError;
+use crate::message::{IrcCursor, IrcSerializable, Message, MESSAGE_MAX_LENGTH};
+use bytes::{Buf, BytesMut};
+use std::{io::Cursor, net::SocketAddr};
 use tokio::{
     self,
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{self, AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
 
-use bytes::{Buf, BytesMut};
-use log::{debug, warn};
+pub const BUFFER_SIZE: usize = 1024 * 2;
 
-use crate::types::Message;
-
+#[derive(Debug)]
 pub struct Connection {
-    tcp_stream: TcpStream,
-    in_buffer: BytesMut,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum IRCError {
-    ClientExited = -1,
-    NoMessageLeftInBuffer = -2,
-    LengthExceeded = -3,
+    stream: TcpStream,
+    buffer: BytesMut,
 }
 
 impl Connection {
-    pub fn new(tcp_stream: TcpStream) -> Self {
+    pub fn new(stream: TcpStream) -> Self {
         return Connection {
-            tcp_stream,
-            in_buffer: BytesMut::with_capacity(1024 * 2),
+            stream: stream,
+            buffer: BytesMut::with_capacity(BUFFER_SIZE),
         };
     }
 
-    pub async fn read(&mut self) -> Result<Message, IRCError> {
+    pub async fn read(&mut self) -> Result<Message, ConnectionError> {
         loop {
             if let Some(msg) = self.parse_frame() {
                 return Ok(msg);
             }
 
-            match self.tcp_stream.read_buf(&mut self.in_buffer).await {
-                Ok(0) => {
-                    debug!("Remote side closed the session or the buffer is full");
-                    self.shutdown().await;
-                    return Err(IRCError::ClientExited);
+            match self.stream.read_buf(&mut self.buffer).await {
+                Ok(0) | Err(_) => {
+                    return Err(ConnectionError::new("client exited".to_string()));
                 }
-                Err(e) => {
-                    warn!("{:}", e);
-                    self.shutdown().await;
-                    return Err(IRCError::ClientExited);
-                }
-                Ok(n) => {
-                    debug!("read {:?} bytes from {:?}", n, self.tcp_stream.peer_addr());
-                }
+                Ok(_) => {}
             }
         }
     }
 
-    pub async fn write(&mut self, msg: Message) -> Result<(), IRCError> {
-        let msg_bytes = msg.to_bytes();
-        let mut idx = 0;
-        loop {
-            match self.tcp_stream.write(&msg_bytes.as_bytes()[idx..]).await {
-                Ok(0) => {
-                    debug!("Remote side closed the session or the message is empty");
-                    self.shutdown().await;
-                    return Err(IRCError::ClientExited);
-                }
-                Err(e) => {
-                    warn!("{:}", e);
-                    self.shutdown().await;
-                    return Err(IRCError::ClientExited);
+    pub async fn write(&mut self, msg: Message) -> Result<(), ConnectionError> {
+        let msg_bytes = msg.to_vec_u8();
+        let mut cursor: Cursor<&[u8]> = Cursor::new(&msg_bytes);
+        while cursor.has_remaining() {
+            match self
+                .stream
+                .write(&cursor.get_ref()[cursor.position() as usize..])
+                .await
+            {
+                Ok(0) | Err(_) => {
+                    return Err(ConnectionError::new("client exited".to_string()));
                 }
                 Ok(n) => {
-                    debug!("write {:?} bytes to {:?}", n, self.tcp_stream.peer_addr());
-                    idx += n;
-                    if n == msg_bytes.len() {
-                        return Ok(());
-                    }
+                    cursor.advance(n);
                 }
-            };
+            }
         }
+        Ok(())
+    }
+
+    pub fn peer_address(&self) -> io::Result<SocketAddr> {
+        self.stream.peer_addr()
+    }
+
+    pub fn local_address(&self) -> io::Result<SocketAddr> {
+        self.stream.local_addr()
     }
 
     pub async fn shutdown(&mut self) {
-        _ = self.tcp_stream.shutdown().await
+        self.stream
+            .shutdown()
+            .await
+            .expect("could not shutdown connection")
     }
 
     fn parse_frame(&mut self) -> Option<Message> {
-        loop {
-            let mut cursor = Cursor::new(self.in_buffer.chunk());
-            match Connection::get_frame(&mut cursor) {
-                Some(msg_bytes) => {
-                    let frame_len = cursor.position() as usize;
-                    let opt_msg = Message::from_bytes(msg_bytes);
-                    self.in_buffer.advance(frame_len);
-                    if let Some(msg) = opt_msg {
-                        return Some(msg);
-                    }
+        let mut cursor = Cursor::new(self.buffer.chunk());
+        match cursor.split_frame() {
+            Some(frame) => match frame.len() {
+                n if n > MESSAGE_MAX_LENGTH => {
+                    self.buffer.advance(n);
+                    None
                 }
-                None => return None,
-            };
-        }
-    }
-
-    fn get_frame<'a>(src: &mut Cursor<&'a [u8]>) -> Option<&'a [u8]> {
-        if src.has_remaining() {
-            let start = src.position() as usize;
-            let end = src.get_ref().len();
-
-            for i in start..end - 1 {
-                // if src.get_ref()[i] == b'\r' && src.get_ref()[i+1] == b'\n' {
-                if src.get_ref()[i] == b'\r' || src.get_ref()[i] == b'\n' {
-                    let mut sep_len = 1;
-                    if src.get_ref()[i + 1] == b'\r' || src.get_ref()[i + 1] == b'\n' {
-                        sep_len += 1;
-                    }
-                    if i - start > 512 {
-                        // TODO: off by one error ???
-                        src.set_position((i + sep_len) as u64);
-                        return None;
-                    }
-                    src.set_position((i + sep_len) as u64);
-                    return Some(&src.get_ref()[start..i]);
+                _ => {
+                    let message = Message::from_u8(frame);
+                    self.buffer.advance(cursor.position() as usize);
+                    message.ok()
                 }
+            },
+            None => {
+                let n = cursor.get_ref().len();
+                if n > MESSAGE_MAX_LENGTH {
+                    self.buffer.advance(n);
+                }
+                None
             }
-            // NOTE: should buffer be advanced when no frame delimiter was read ?
-            // src.set_position((end+1)as u64);
         }
-        return None;
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::Connection;
+    use crate::message::{Command, IrcSerializable, Message};
     use log::info;
     use std::net::SocketAddr;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpStream},
     };
-
-    use crate::types::{Command, Message};
-
-    use super::Connection;
 
     async fn start_listen() -> (TcpListener, SocketAddr) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -150,24 +118,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_write() {
+    async fn test_connection_write1() {
         let (listener, _) = start_listen().await;
         let stream = TcpStream::connect(listener.local_addr().unwrap())
             .await
             .unwrap();
-        let (mut server, client_addr) = listener.accept().await.unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
         let mut client = Connection::new(stream);
-        info!("Client connected from {}", client_addr);
+        info!("Client connected from {}", client.local_address().unwrap());
 
-        let command = Command::PRIVMSG {
-            targets: "#chan".to_string(),
-            text: "Hello".to_string(),
-        };
-        let message = Message {
-            tags: None,
-            source: None,
-            command,
-        };
+        let message = Message::new(
+            None,
+            None,
+            Command::PRIVMSG {
+                targets: "#chan".to_string(),
+                text: "Hello".to_string(),
+            },
+        );
         client.write(message).await.unwrap();
         client.shutdown().await;
 
@@ -177,27 +144,88 @@ mod tests {
         assert_eq!("PRIVMSG #chan Hello\r\n", res);
         client.shutdown().await;
         server.shutdown().await.unwrap();
-        drop(listener);
     }
 
     #[tokio::test]
-    async fn test_read() {
+    async fn test_connection_write2() {
         let (listener, _) = start_listen().await;
         let stream = TcpStream::connect(listener.local_addr().unwrap())
             .await
             .unwrap();
-        let (mut server, client_addr) = listener.accept().await.unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
         let mut client = Connection::new(stream);
-        info!("Client connected from {}", client_addr);
+        info!("Client connected from {}", client.local_address().unwrap());
 
-        let _ = server.write_all(b"PRIVMSG #chan Hello\r\n").await;
+        let message = Message::new(
+            None,
+            None,
+            Command::PRIVMSG {
+                targets: "#chan".to_string(),
+                text: "Hello".to_string(),
+            },
+        );
+        client.write(message.clone()).await.unwrap();
+        client.write(message).await.unwrap();
+        client.shutdown().await;
+
+        let mut res = String::new();
+        server.read_to_string(&mut res).await.unwrap();
+
+        assert_eq!("PRIVMSG #chan Hello\r\nPRIVMSG #chan Hello\r\n", res);
+        client.shutdown().await;
+        server.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_connection_read1() {
+        let (listener, _) = start_listen().await;
+        let stream = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        let mut client = Connection::new(stream);
+        info!("Client connected from {}", client.local_address().unwrap());
+
+        server.write_all(b"PRIVMSG #chan Hello\r\n").await.unwrap();
 
         assert_eq!(
-            b"PRIVMSG #chan Hello\r\n",
-            client.read().await.unwrap().to_bytes().as_bytes()
+            String::from("PRIVMSG #chan Hello\r\n"),
+            String::from_utf8(client.read().await.unwrap().to_vec_u8()).unwrap()
         );
         client.shutdown().await;
         server.shutdown().await.unwrap();
-        drop(listener);
+    }
+
+    #[tokio::test]
+    async fn test_connection_read2() {
+        let (listener, _) = start_listen().await;
+        let stream = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        let mut client = Connection::new(stream);
+        info!("Client connected from {}", client.local_address().unwrap());
+
+        server.write_all(b"PRIVMSG #chan Hello\r\n").await.unwrap();
+        server.write_all(b"PRIVMSG #chan Hello\r\n").await.unwrap();
+
+        let mut msg = String::new();
+        msg.push_str(
+            String::from_utf8(client.read().await.unwrap().to_vec_u8())
+                .unwrap()
+                .as_str(),
+        );
+        msg.push_str(
+            String::from_utf8(client.read().await.unwrap().to_vec_u8())
+                .unwrap()
+                .as_str(),
+        );
+
+        assert_eq!(
+            String::from("PRIVMSG #chan Hello\r\nPRIVMSG #chan Hello\r\n"),
+            msg
+        );
+        client.shutdown().await;
+        server.shutdown().await.unwrap();
     }
 }
