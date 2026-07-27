@@ -140,11 +140,11 @@ pub enum Command {
         reason: String,
     },
     JOIN {
-        channels: String,
-        keys: Option<String>,
+        channels: Vec<String>,
+        keys: Option<Vec<String>>,
     },
     PRIVMSG {
-        targets: String,
+        targets: Vec<String>,
         text: String,
     },
     WHO {
@@ -286,11 +286,11 @@ impl Command {
                 reason: required!(),
             },
             "JOIN" => JOIN {
-                channels: required!(),
-                keys: optional!(),
+                channels: required!().split(",").map(|c| c.to_string()).collect(),
+                keys: optional!().and_then(|k| Some(k.split(",").map(|k| k.to_string()).collect())),
             },
             "PRIVMSG" => PRIVMSG {
-                targets: required!(),
+                targets: required!().split(",").map(|t| t.to_string()).collect(),
                 text: required!(),
             },
             "WHO" => WHO { mask: required!() },
@@ -394,10 +394,17 @@ impl Command {
                     vec![token.to_string()]
                 }
             }
-            JOIN { channels, keys } => std::iter::once(channels.to_string())
-                .chain(keys.clone())
-                .collect(),
-            PRIVMSG { targets, text } => vec![targets.to_string(), text.to_string()],
+            JOIN { channels, keys } => {
+                if let Some(keys) = keys {
+                    let mut res = Vec::new();
+                    res.extend(channels.iter().map(|c| c.clone()));
+                    res.extend(keys.iter().map(|k| k.clone()));
+                    res
+                } else {
+                    channels.iter().map(|c| c.clone()).collect()
+                }
+            }
+            PRIVMSG { targets, text } => vec![targets.join(","), text.to_string()],
             PASS { password } => vec![password.to_string()],
             NICK { nickname } => vec![nickname.to_string()],
             USER {
