@@ -98,7 +98,7 @@ pub struct TagKey {
 
 #[derive(Debug, Clone, Default)]
 pub struct Source {
-    name: String,
+    pub name: String,
     user: Option<String>,
     host: Option<String>,
 }
@@ -468,6 +468,7 @@ impl Command {
             NICK { .. } => "NICK".to_string(),
             USER { .. } => "USER".to_string(),
             WHO { .. } => "WHO".to_string(),
+            QUIT { .. } => "QUIT".to_string(),
 
             RPL_WELCOME { .. } => "001".to_string(),
             RPL_YOURHOST { .. } => "002".to_string(),
@@ -575,12 +576,12 @@ impl Message {
         }
     }
 
-    pub fn tags(&self) -> &Option<Tags> {
-        &self.tags
+    pub fn tags(&self) -> Option<&Tags> {
+        self.tags.as_ref()
     }
 
-    pub fn source(&self) -> &Option<Source> {
-        &self.source
+    pub fn source(&self) -> Option<&Source> {
+        self.source.as_ref()
     }
 
     pub fn command(&self) -> &Command {
