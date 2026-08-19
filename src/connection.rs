@@ -131,7 +131,7 @@ mod tests {
             None,
             None,
             Command::PRIVMSG {
-                targets: "#chan".to_string(),
+                targets: vec!["#chan".to_string()],
                 text: "Hello".to_string(),
             },
         );
@@ -160,7 +160,7 @@ mod tests {
             None,
             None,
             Command::PRIVMSG {
-                targets: "#chan".to_string(),
+                targets: vec!["#chan".to_string()],
                 text: "Hello".to_string(),
             },
         );
