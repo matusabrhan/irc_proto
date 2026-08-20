@@ -549,21 +549,21 @@ impl IrcSerializable for Command {
     }
 
     fn to_vec_u8(&self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::new();
-        bytes.append(&mut self.command().as_bytes().to_vec());
+        let mut buffer: Vec<u8> = Vec::new();
+        buffer.extend_from_slice(self.command().as_bytes());
         for param in self.params() {
-            bytes.append(&mut SPACE.to_vec());
+            buffer.extend_from_slice(SPACE.as_slice());
             match param.contains(SPACE[0] as char) {
                 true => {
-                    bytes.append(&mut COLON.to_vec());
-                    bytes.append(&mut param.as_bytes().to_vec());
+                    buffer.extend_from_slice(COLON.as_slice());
+                    buffer.extend_from_slice(param.as_bytes());
                 }
                 false => {
-                    bytes.append(&mut param.as_bytes().to_vec());
+                    buffer.extend_from_slice(param.as_bytes());
                 }
             }
         }
-        bytes
+        buffer
     }
 }
 
@@ -635,23 +635,23 @@ impl IrcSerializable for Message {
     }
 
     fn to_vec_u8(&self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::new();
+        let mut buffer: Vec<u8> = Vec::new();
 
         if let Some(tags) = &self.tags {
-            bytes.append(&mut AT.to_vec());
-            bytes.append(&mut tags.to_vec_u8());
-            bytes.append(&mut SPACE.to_vec());
+            buffer.extend_from_slice(AT.as_slice());
+            buffer.extend_from_slice(&tags.to_vec_u8());
+            buffer.extend_from_slice(SPACE.as_slice());
         }
 
         if let Some(source) = &self.source {
-            bytes.append(&mut COLON.to_vec());
-            bytes.append(&mut source.to_vec_u8());
-            bytes.append(&mut SPACE.to_vec());
+            buffer.extend_from_slice(COLON.as_slice());
+            buffer.extend_from_slice(&source.to_vec_u8());
+            buffer.extend_from_slice(SPACE.as_slice());
         }
 
-        bytes.append(&mut self.command.to_vec_u8());
-        bytes.append(&mut MESSAGE_END.to_vec());
-        return bytes;
+        buffer.extend_from_slice(&self.command.to_vec_u8());
+        buffer.extend_from_slice(MESSAGE_END.as_slice());
+        return buffer;
     }
 }
 
@@ -681,7 +681,7 @@ impl IrcSerializable for Tags {
     fn to_vec_u8(&self) -> Vec<u8> {
         let mut buffer: Vec<u8> = Vec::new();
         for tag in &self.tags {
-            buffer.append(&mut tag.to_vec_u8());
+            buffer.extend_from_slice(&tag.to_vec_u8());
         }
         buffer
     }
@@ -710,10 +710,10 @@ impl IrcSerializable for Tag {
 
     fn to_vec_u8(&self) -> Vec<u8> {
         let mut buffer: Vec<u8> = Vec::new();
-        buffer.append(&mut self.key.to_vec_u8());
+        buffer.extend_from_slice(&self.key.to_vec_u8());
         if let Some(value) = &self.value {
-            buffer.push(EQUAL[0]);
-            buffer.append(&mut Vec::from(value.as_bytes()));
+            buffer.extend_from_slice(&EQUAL);
+            buffer.extend_from_slice(value.as_bytes());
         }
         buffer
     }
@@ -752,12 +752,12 @@ impl IrcSerializable for TagKey {
     fn to_vec_u8(&self) -> Vec<u8> {
         let mut buffer: Vec<u8> = Vec::new();
         if let Some(client_prefix) = &self.client_prefix {
-            buffer.append(&mut Vec::from(client_prefix.as_bytes()))
+            buffer.extend_from_slice(client_prefix.as_bytes());
         }
         if let Some(vendor) = &self.vendor {
-            buffer.append(&mut Vec::from(vendor.as_bytes()));
+            buffer.extend_from_slice(vendor.as_bytes());
         }
-        buffer.append(&mut Vec::from(self.value.as_bytes()));
+        buffer.extend_from_slice(self.value.as_bytes());
         buffer
     }
 }
@@ -813,14 +813,14 @@ impl IrcSerializable for Source {
 
     fn to_vec_u8(&self) -> Vec<u8> {
         let mut buffer: Vec<u8> = Vec::new();
-        buffer.append(&mut Vec::from(self.name.as_bytes()));
+        buffer.extend_from_slice(self.name.as_bytes());
         if let Some(user) = &self.user {
-            buffer.push(BANG[0]);
-            buffer.append(&mut Vec::from(user.as_bytes()));
+            buffer.extend_from_slice(&BANG);
+            buffer.extend_from_slice(user.as_bytes());
         }
         if let Some(host) = &self.host {
-            buffer.push(AT[0]);
-            buffer.append(&mut Vec::from(host.as_bytes()));
+            buffer.extend_from_slice(&AT);
+            buffer.extend_from_slice(host.as_bytes());
         }
         buffer
     }
