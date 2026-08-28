@@ -8,3 +8,20 @@ bytes = {version = "1.12"}
 log = {version = "0.4"}
 env_logger = {version = "0.11"}
 tokio = { version = "1.53", features = ["full"] }
+
+[dev-dependencies]
+criterion = "0.8.2"
+
+[profile.release]
+debug = true
+
+[[bench]]
+name = "message_v2"
+harness = false
+
+[[bench]]
+name = "message_v1"
+harness = false
+
+[[example]]
+name = "message_v2"
