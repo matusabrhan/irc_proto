@@ -5,7 +5,7 @@ use crate::{
     token::{Token, TokenKind},
 };
 
-pub struct Lexer<'a> {
+pub(crate) struct Lexer<'a> {
     input: Chars<'a>,
     cursor: u16,
     read_cursor: u16,
@@ -14,7 +14,7 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub(crate) fn new(input: &'a str) -> Self {
         let mut input = input.chars();
         Self {
             cursor: 0,
@@ -43,7 +43,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn next_token(&mut self) -> Token {
+    pub(crate) fn next_token(&mut self) -> Token {
         let token = match self.current {
             SPACE => Token::new(TokenKind::Space, self.cursor, 1),
 
@@ -67,6 +67,14 @@ impl<'a> Lexer<'a> {
 
             STAR => Token::new(TokenKind::Star, self.cursor, 1),
 
+            PERIOD => Token::new(TokenKind::Period, self.cursor, 1),
+
+            COMMA => Token::new(TokenKind::Comma, self.cursor, 1),
+
+            MINUS => Token::new(TokenKind::Minus, self.cursor, 1),
+
+            PLUS => Token::new(TokenKind::Plus, self.cursor, 1),
+
             CR => match self.peek.eq(&LF) {
                 true => return Token::new(TokenKind::EOM, self.cursor, 2),
                 false => return Token::new(TokenKind::EOM, self.cursor, 1),
@@ -81,7 +89,7 @@ impl<'a> Lexer<'a> {
                 Token::new(TokenKind::Text, start, stop - start)
             }
 
-            _ => Token::new(TokenKind::Invalid, self.cursor, 0),
+            _ => return Token::new(TokenKind::Invalid, self.cursor, 0),
         };
         self.read_char();
 
@@ -92,14 +100,12 @@ impl<'a> Lexer<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        enable_logging,
         lexer::Lexer,
         token::{Token, TokenKind},
     };
 
     #[test]
     fn test_lexer1() {
-        enable_logging();
         let input = "aaaa @:bbbbb ab123cd\rasdfasdf";
         let mut lexer = Lexer::new(input);
 
@@ -116,7 +122,6 @@ mod tests {
 
     #[test]
     fn test_lexer2() {
-        enable_logging();
         let input = "@id=234AB :dan!d@localhost PRIVMSG #chan :Hey what's up!\r\n";
         let mut lexer = Lexer::new(input);
 
@@ -150,5 +155,23 @@ mod tests {
         assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 53, 2));
         assert_eq!(lexer.next_token(), Token::new(TokenKind::Bang, 55, 1));
         assert_eq!(lexer.next_token(), Token::new(TokenKind::EOM, 56, 2));
+    }
+
+    #[test]
+    fn test_lexer3() {
+        let input = "a^b";
+        let mut lexer = Lexer::new(input);
+
+        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 0, 1));
+        assert_eq!(lexer.next_token(), Token::new(TokenKind::Invalid, 1, 0));
+        assert_eq!(lexer.next_token(), Token::new(TokenKind::Invalid, 1, 0));
+    }
+
+    #[test]
+    fn test_lexer4() {
+        let input = "";
+        let mut lexer = Lexer::new(input);
+
+        assert_eq!(lexer.next_token(), Token::new(TokenKind::Invalid, 0, 0));
     }
 }

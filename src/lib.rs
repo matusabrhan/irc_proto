@@ -8,11 +8,15 @@ pub mod parser;
 pub mod token;
 
 pub mod strings {
-    pub const PING: &'static str = "PING";
-    pub const PONG: &'static str = "PONG";
-    pub const CAP: &'static str = "CAP";
-    pub const USER: &'static str = "USER";
-    pub const PRIVMSG: &'static str = "PRIVMSG";
+    pub const PING: &str = "PING";
+    pub const PONG: &str = "PONG";
+    pub const CAP: &str = "CAP";
+    pub const PASS: &str = "PASS";
+    pub const NICK: &str = "NICK";
+    pub const USER: &str = "USER";
+    pub const QUIT: &str = "QUIT";
+    pub const JOIN: &str = "JOIN";
+    pub const PRIVMSG: &str = "PRIVMSG";
 
     pub const CR: char = '\r';
     pub const LF: char = '\n';
@@ -27,6 +31,10 @@ pub mod strings {
     pub const SLASH: char = '/';
     pub const HASH: char = '#';
     pub const STAR: char = '*';
+    pub const PERIOD: char = '.';
+    pub const COMMA: char = ',';
+    pub const MINUS: char = '-';
+    pub const PLUS: char = '+';
 }
 
 pub fn enable_logging() {

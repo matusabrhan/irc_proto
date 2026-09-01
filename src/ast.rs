@@ -1,10 +1,8 @@
-use crate::token::Token;
-
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct NodeId(pub u8);
+pub(crate) struct NodeId(pub(crate) u8);
 
 #[derive(Debug, PartialEq, Eq, Default)]
-pub enum NodeKind {
+pub(crate) enum NodeKind {
     Message {
         tags: Option<NodeId>,
         source: Option<NodeId>,
@@ -13,13 +11,27 @@ pub enum NodeKind {
 
     Tags(Box<[NodeId]>),
     Tag {
-        key: Token,
-        value: Option<Token>,
+        key: NodeId,
+        value: Option<NodeId>,
     },
+    TagKey,
+    TagValue,
+
     Source {
-        name: Token,
-        user: Option<Token>,
-        host: Option<Token>,
+        name: NodeId,
+        user: Option<NodeId>,
+        host: Option<NodeId>,
+    },
+    SourceName,
+    SourceUser,
+    SourceHost,
+
+    CommandPing {
+        token: NodeId,
+    },
+    CommandPong {
+        server: Option<NodeId>,
+        token: NodeId,
     },
 
     CommandCap {
@@ -38,16 +50,17 @@ pub enum NodeKind {
         unused: NodeId,
         realname: NodeId,
     },
+    CommandQuit {
+        reason: Option<NodeId>,
+    },
+
+    CommandJoin {
+        channels: NodeId,
+        keys: Option<NodeId>,
+    },
     CommandPrivMsg {
         targets: NodeId,
         text: NodeId,
-    },
-    CommandPing {
-        token: NodeId,
-    },
-    CommandPong {
-        server: Option<NodeId>,
-        token: NodeId,
     },
 
     Parameter,
@@ -64,7 +77,7 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn new(kind: NodeKind, start: u16, length: u16) -> Self {
+    pub(crate) fn new(kind: NodeKind, start: u16, length: u16) -> Self {
         Self {
             kind,
             start,
@@ -72,7 +85,7 @@ impl Node {
         }
     }
 
-    pub fn kind(&self) -> &NodeKind {
+    pub(crate) fn kind(&self) -> &NodeKind {
         &self.kind
     }
 

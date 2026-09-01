@@ -5,11 +5,11 @@ use std::hint::black_box;
 fn bench_parse_message(c: &mut Criterion) {
     c.bench_function("bench message parsing", |b| {
         let message_strings = vec![
-            // ":irc.example.com PING server1 token",
-            // ":irc.example.com PONG server1 token",
+            ":irc.example.com PING server1 token",
+            ":irc.example.com PONG server1 token",
             "@id=234AB :dan!d@localhost PRIVMSG #chan :Hey what's up!",
-            // ":irc.example.com USER username1 0 * realname1",
-            // ":irc.example.com CAP REQ :multi-prefix extended-join sasl",
+            ":irc.example.com USER username1 0 * realname1",
+            ":irc.example.com CAP REQ :multi-prefix extended-join sasl",
         ]
         .repeat(1000);
         b.iter(|| {

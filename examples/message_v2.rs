@@ -1,28 +1,62 @@
-use irc_proto::{ast::NodeKind, message_v2::MessageV2};
+use irc_proto::message_v2::{Command, MessageBuilder, MessageV2};
 
 fn main() {
-    let message_strings = vec![
-        // ":irc.example.com PING server1 token\r\n",
-        // ":irc.example.com PONG server1 token\r\n",
-        "@id=234AB :dan!d@localhost PRIVMSG #chan :Hey what's up!\r\n",
-        // ":irc.example.com USER username1 0 * realname1\r\n",
-        // ":irc.example.com CAP REQ :multi-prefix extended-join sasl\r\n",
-    ]
-    .repeat(1000);
+    let mut message_strings = Vec::new();
 
-    let mut results = Vec::new();
+    message_strings.push(
+        MessageBuilder::with_command(Command::PONG {
+            server: None,
+            token: "token",
+        })
+        .with_source("irc.example.com", None, None)
+        .build()
+        .unwrap()
+        .contents()
+        .to_string(),
+    );
 
-    for s in message_strings.clone() {
+    message_strings.push(
+        MessageBuilder::with_command(Command::PRIVMSG {
+            targets: "#chan",
+            text: "Hey what's up!",
+        })
+        .with_source("dan", Some("d"), Some("localhost"))
+        .build()
+        .unwrap()
+        .contents()
+        .to_string(),
+    );
+
+    message_strings.push(
+        MessageBuilder::with_command(Command::USER {
+            user: "username1",
+            mode: "0",
+            unused: "*",
+            realname: "realname1",
+        })
+        .with_source("irc.example.com", None, None)
+        .build()
+        .unwrap()
+        .contents()
+        .to_string(),
+    );
+
+    message_strings.push(
+        MessageBuilder::with_command(Command::CAP {
+            subcommand: "REQ",
+            capabilities: Some("multi-prefix extended-join sasl"),
+        })
+        .with_source("irc.example.com", None, None)
+        .build()
+        .unwrap()
+        .contents()
+        .to_string(),
+    );
+
+    for s in message_strings {
         let message = MessageV2::new(s.as_bytes().to_vec()).unwrap();
 
-        let text = match message.get_command().kind() {
-            NodeKind::CommandPrivMsg { text, .. } => {
-                message.get_value(text.clone()).map(|s| s.to_string())
-            }
-            _ => None,
-        };
-        results.push(text);
+        let text = message.contents();
+        println!("{:?}", text);
     }
-
-    println!("{:?}", results);
 }
