@@ -1,4 +1,4 @@
-use irc_proto::message_v2::{Command, MessageBuilder, MessageV2};
+use irc_proto::message::{Command, Message, MessageBuilder};
 
 fn main() {
     let mut message_strings = Vec::new();
@@ -54,7 +54,7 @@ fn main() {
     );
 
     for s in message_strings {
-        let message = MessageV2::new(s.as_bytes().to_vec()).unwrap();
+        let message = Message::new(s.as_bytes()).unwrap();
 
         let text = message.contents();
         println!("{:?}", text);

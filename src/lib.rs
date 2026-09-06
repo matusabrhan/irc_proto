@@ -1,9 +1,7 @@
 pub mod ast;
 pub mod connection;
-pub mod error;
 pub mod lexer;
 pub mod message;
-pub mod message_v2;
 pub mod parser;
 pub mod token;
 
