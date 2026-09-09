@@ -1,7 +1,8 @@
-use std::{
-    io::{Read, Write},
-    net::{Shutdown, TcpStream},
-};
+#[cfg(feature = "std-stream")]
+use std::io::{Read, Write};
+
+#[cfg(feature = "tokio-stream")]
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Debug)]
 pub enum ConnectionError {
@@ -13,16 +14,20 @@ use crate::message::Message;
 
 #[derive(Debug)]
 pub struct Connection {
-    stream: TcpStream,
+    #[cfg(feature = "std-stream")]
+    stream: std::net::TcpStream,
+    #[cfg(feature = "tokio-stream")]
+    stream: tokio::net::TcpStream,
     buffer: [u8; Self::BUFFER_SIZE],
     length: usize,
     cursor: usize,
 }
 
+#[cfg(feature = "std-stream")]
 impl Connection {
     const BUFFER_SIZE: usize = 1024 * 2;
 
-    pub fn new(stream: TcpStream) -> Self {
+    pub fn new(stream: std::net::TcpStream) -> Self {
         Self {
             stream,
             buffer: [0; Self::BUFFER_SIZE],
@@ -60,10 +65,63 @@ impl Connection {
     }
 
     pub fn close(&mut self) -> Result<(), ()> {
-        self.stream.shutdown(Shutdown::Both).map_err(|_| ())
+        self.stream
+            .shutdown(std::net::Shutdown::Both)
+            .map_err(|_| ())
     }
 }
 
+#[cfg(feature = "tokio-stream")]
+impl Connection {
+    const BUFFER_SIZE: usize = 1024 * 2;
+
+    pub fn new(stream: tokio::net::TcpStream) -> Self {
+        Self {
+            stream,
+            buffer: [0; Self::BUFFER_SIZE],
+            length: 0,
+            cursor: 0,
+        }
+    }
+
+    pub async fn read(&mut self) -> Result<Message, ConnectionError> {
+        if self.cursor >= self.length {
+            self.length = self
+                .stream
+                .read(&mut self.buffer)
+                .await
+                .map_err(|_| ConnectionError::IOError)?;
+            self.cursor = 0;
+        }
+
+        match Message::new(&self.buffer[self.cursor..self.length]) {
+            Ok(message) => {
+                self.cursor += message.contents().len();
+                Ok(message)
+            }
+            Err(end) => {
+                self.cursor += end;
+                Err(ConnectionError::ParsingError)
+            }
+        }
+    }
+
+    pub async fn write(&mut self, msg: Message) -> Result<(), ConnectionError> {
+        self.stream
+            .write(msg.contents().as_bytes())
+            .await
+            .map_err(|_| ConnectionError::IOError)?;
+
+        Ok(())
+    }
+
+    pub async fn close(&mut self) -> Result<(), ()> {
+        self.stream.shutdown().await.map_err(|_| ())?;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "std-stream")]
 #[cfg(test)]
 mod tests {
     use std::{

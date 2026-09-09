@@ -5,6 +5,12 @@ pub mod message;
 pub mod parser;
 pub mod token;
 
+#[cfg(all(feature = "std-stream", feature = "tokio-stream"))]
+compile_error!("features `std-stream` and `tokio-stream` are mutually exclusive");
+
+#[cfg(not(any(feature = "std-stream", feature = "tokio-stream")))]
+compile_error!("enable either `std-stream` or `tokio-stream`");
+
 pub mod strings {
     pub const PING: &str = "PING";
     pub const PONG: &str = "PONG";
