@@ -21,7 +21,7 @@ impl<'a> Lexer<'a> {
             read_cursor: 1,
             current: input.next().unwrap_or(char::MIN),
             peek: input.next().unwrap_or(char::MIN),
-            input: input,
+            input,
         }
     }
 
@@ -53,7 +53,11 @@ impl<'a> Lexer<'a> {
 
             SEMICOLON => Token::new(TokenKind::Semicolon, self.cursor, 1),
 
+            LESSER => Token::new(TokenKind::Lesser, self.cursor, 1),
+
             EQUALS => Token::new(TokenKind::Equals, self.cursor, 1),
+
+            GREATER => Token::new(TokenKind::Greater, self.cursor, 1),
 
             BANG => Token::new(TokenKind::Bang, self.cursor, 1),
 
@@ -70,6 +74,8 @@ impl<'a> Lexer<'a> {
             PERIOD => Token::new(TokenKind::Period, self.cursor, 1),
 
             COMMA => Token::new(TokenKind::Comma, self.cursor, 1),
+
+            DASH => Token::new(TokenKind::Dash, self.cursor, 1),
 
             MINUS => Token::new(TokenKind::Minus, self.cursor, 1),
 

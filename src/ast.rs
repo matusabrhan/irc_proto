@@ -1,7 +1,7 @@
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct NodeId(pub(crate) u8);
 
-#[derive(Debug, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) enum NodeKind {
     Message {
         tags: Option<NodeId>,
@@ -63,13 +63,41 @@ pub(crate) enum NodeKind {
         text: NodeId,
     },
 
+    RplWelcome {
+        client: NodeId,
+        text: NodeId,
+    },
+    RplYourhost {
+        client: NodeId,
+        text: NodeId,
+    },
+    RplCreated {
+        client: NodeId,
+        text: NodeId,
+    },
+    RplMyinfo {
+        client: NodeId,
+        servername: NodeId,
+        version: NodeId,
+        user_modes: NodeId,
+        channel_modes: NodeId,
+    },
+
+    ErrPasswdmismatch {
+        client: NodeId,
+    },
+    ErrNicknameinuse {
+        client: NodeId,
+        nick: NodeId,
+    },
+
     Parameter,
 
     #[default]
     Invalid,
 }
 
-#[derive(Debug, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Node {
     kind: NodeKind,
     start: u16,

@@ -40,6 +40,15 @@ impl<'a> Parser<'a> {
         id
     }
 
+    pub(crate) fn end_of_message(&mut self) -> Option<usize> {
+        loop {
+            if let TokenKind::EOM = self.current.kind() {
+                return Some((self.current.start() + self.current.length()) as usize);
+            }
+            self.next_token().ok()?;
+        }
+    }
+
     pub(crate) fn parse_message(&mut self) -> Result<NodeId, ()> {
         let tags = match self.current.kind() == TokenKind::At {
             true => {
@@ -343,6 +352,77 @@ impl<'a> Parser<'a> {
 
                 Ok(self.store_node(
                     NodeKind::CommandPrivMsg { targets, text },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+
+            Some(strings::RPL_WELCOME) => {
+                let client = self.parse_param()?;
+                let text = self.parse_param()?;
+
+                Ok(self.store_node(
+                    NodeKind::RplWelcome { client, text },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+            Some(strings::RPL_YOURHOST) => {
+                let client = self.parse_param()?;
+                let text = self.parse_param()?;
+
+                Ok(self.store_node(
+                    NodeKind::RplYourhost { client, text },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+            Some(strings::RPL_CREATED) => {
+                let client = self.parse_param()?;
+                let text = self.parse_param()?;
+
+                Ok(self.store_node(
+                    NodeKind::RplCreated { client, text },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+            Some(strings::RPL_MYINFO) => {
+                let client = self.parse_param()?;
+                let servername = self.parse_param()?;
+                let version = self.parse_param()?;
+                let user_modes = self.parse_param()?;
+                let channel_modes = self.parse_param()?;
+
+                Ok(self.store_node(
+                    NodeKind::RplMyinfo {
+                        client,
+                        servername,
+                        version,
+                        user_modes,
+                        channel_modes,
+                    },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+
+            Some(strings::ERR_PASSWDMISMATCH) => {
+                let client = self.parse_param()?;
+
+                Ok(self.store_node(
+                    NodeKind::ErrPasswdmismatch { client },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+
+            Some(strings::ERR_NICKNAMEINUSE) => {
+                let client = self.parse_param()?;
+                let nick = self.parse_param()?;
+
+                Ok(self.store_node(
+                    NodeKind::ErrNicknameinuse { client, nick },
                     start_token.start(),
                     self.current.start() - start_token.start(),
                 ))

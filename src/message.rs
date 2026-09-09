@@ -6,6 +6,7 @@ use crate::{
     strings::*,
 };
 
+#[derive(Debug, Clone)]
 struct Nodes<T>(Box<[T]>);
 
 impl<T> Index<NodeId> for Nodes<T> {
@@ -16,6 +17,7 @@ impl<T> Index<NodeId> for Nodes<T> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Message {
     text: Box<str>,
     tags_id: Option<NodeId>,
@@ -64,9 +66,48 @@ pub enum Command<'a> {
         realname: &'a str,
     },
 
+    JOIN {
+        channels: &'a str,
+        keys: Option<&'a str>,
+    },
+
     PRIVMSG {
         targets: &'a str,
         text: &'a str,
+    },
+
+    QUIT {
+        reason: &'a str,
+    },
+
+    RPL_WELCOME {
+        client: &'a str,
+        text: &'a str,
+    },
+    RPL_YOURHOST {
+        client: &'a str,
+        text: &'a str,
+    },
+    RPL_CREATED {
+        client: &'a str,
+        text: &'a str,
+    },
+    RPL_MYINFO {
+        client: &'a str,
+        servername: &'a str,
+        version: &'a str,
+        user_modes: &'a str,
+        channel_modes: &'a str,
+        //TODO: channel_modes_wiht_params
+    },
+
+    ERR_PASSWDMISMATCH {
+        client: &'a str,
+    },
+
+    ERR_NICKNAMEINUSE {
+        client: &'a str,
+        nick: &'a str,
     },
 }
 
@@ -80,7 +121,18 @@ impl<'a> Command<'a> {
             Self::PASS { .. } => PASS,
             Self::NICK { .. } => NICK,
             Self::USER { .. } => USER,
+            Self::QUIT { .. } => QUIT,
+
+            Self::JOIN { .. } => JOIN,
             Self::PRIVMSG { .. } => PRIVMSG,
+
+            Self::RPL_WELCOME { .. } => RPL_WELCOME,
+            Self::RPL_YOURHOST { .. } => RPL_YOURHOST,
+            Self::RPL_CREATED { .. } => RPL_CREATED,
+            Self::RPL_MYINFO { .. } => RPL_MYINFO,
+
+            Self::ERR_PASSWDMISMATCH { .. } => ERR_PASSWDMISMATCH,
+            Self::ERR_NICKNAMEINUSE { .. } => ERR_NICKNAMEINUSE,
         }
     }
 
@@ -111,7 +163,30 @@ impl<'a> Command<'a> {
                 unused,
                 realname,
             } => Box::new([user, mode, unused, realname]),
+
             Self::PRIVMSG { targets, text } => Box::new([targets, text]),
+            Self::JOIN { channels, keys } => {
+                if let Some(keys) = keys {
+                    return Box::new([channels, keys]);
+                }
+                Box::new([channels])
+            }
+
+            Self::QUIT { reason } => Box::new([reason]),
+
+            Self::RPL_WELCOME { client, text } => Box::new([client, text]),
+            Self::RPL_YOURHOST { client, text } => Box::new([client, text]),
+            Self::RPL_CREATED { client, text } => Box::new([client, text]),
+            Self::RPL_MYINFO {
+                client,
+                servername,
+                version,
+                user_modes,
+                channel_modes,
+            } => Box::new([client, servername, version, user_modes, channel_modes]),
+
+            Self::ERR_PASSWDMISMATCH { client } => Box::new([client]),
+            Self::ERR_NICKNAMEINUSE { client, nick } => Box::new([client, nick]),
         }
     }
 }
@@ -124,26 +199,35 @@ pub struct MessageBuilder<'a> {
 }
 
 impl Message {
-    pub fn new(input: &[u8]) -> Option<Self> {
-        let text: Box<str> = String::from_utf8(input.to_vec()).ok()?.into_boxed_str();
-        let (root, nodes) = {
-            let mut parser = Parser::new(text.as_ref());
-            (parser.parse_message().ok()?, Nodes(parser.get_nodes()))
-        };
+    pub fn new(input: &[u8]) -> Result<Self, usize> {
+        let text = String::from_utf8(input.to_vec())
+            .map_err(|_| input.len())?
+            .into_boxed_str();
 
-        match nodes.index(root).kind() {
+        let mut parser = Parser::new(text.as_ref());
+        let root = match parser.parse_message() {
+            Ok(root) => root,
+            Err(()) => return Err(parser.end_of_message().unwrap_or(text.len())),
+        };
+        let nodes = Nodes(parser.get_nodes());
+
+        match nodes.index(root.clone()).kind() {
             NodeKind::Message {
                 tags,
                 source,
                 command,
-            } => Some(Self {
-                text,
-                tags_id: tags.clone(),
-                source_id: source.clone(),
-                command_id: command.clone(),
-                nodes,
-            }),
-            _ => None,
+            } => {
+                let mut text: String = text.into();
+                text.truncate(nodes.index(root).length());
+                Ok(Self {
+                    text: text.into_boxed_str(),
+                    tags_id: tags.clone(),
+                    source_id: source.clone(),
+                    command_id: command.clone(),
+                    nodes,
+                })
+            }
+            _ => Err(text.len()),
         }
     }
 
@@ -202,6 +286,17 @@ impl Message {
                 unused: self.get_value(unused.clone()),
                 realname: self.get_value(realname.clone()),
             },
+
+            NodeKind::CommandJoin { channels, keys } => {
+                let keys = match keys {
+                    Some(keys) => Some(self.get_value(keys.clone())),
+                    None => None,
+                };
+                Command::JOIN {
+                    channels: self.get_value(channels.clone()),
+                    keys,
+                }
+            }
 
             NodeKind::CommandPrivMsg { targets, text } => Command::PRIVMSG {
                 targets: self.get_value(targets.clone()),
@@ -318,7 +413,7 @@ impl<'a> MessageBuilder<'a> {
         buffer.push(CR as u8);
         buffer.push(LF as u8);
 
-        Message::new(&buffer)
+        Message::new(&buffer).ok()
     }
 }
 
