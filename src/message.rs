@@ -305,10 +305,43 @@ impl Message {
                     keys,
                 }
             }
-
             NodeKind::CommandPrivMsg { targets, text } => Command::PRIVMSG {
                 targets: self.get_value(targets.clone()),
                 text: self.get_value(text.clone()),
+            },
+
+            NodeKind::RplWelcome { client, text } => Command::RPL_WELCOME {
+                client: self.get_value(client.clone()),
+                text: self.get_value(text.clone()),
+            },
+            NodeKind::RplYourhost { client, text } => Command::RPL_YOURHOST {
+                client: self.get_value(client.clone()),
+                text: self.get_value(text.clone()),
+            },
+            NodeKind::RplCreated { client, text } => Command::RPL_CREATED {
+                client: self.get_value(client.clone()),
+                text: self.get_value(text.clone()),
+            },
+            NodeKind::RplMyinfo {
+                client,
+                servername,
+                version,
+                user_modes,
+                channel_modes,
+            } => Command::RPL_MYINFO {
+                client: self.get_value(client.clone()),
+                servername: self.get_value(servername.clone()),
+                version: self.get_value(version.clone()),
+                user_modes: self.get_value(user_modes.clone()),
+                channel_modes: self.get_value(channel_modes.clone()),
+            },
+
+            NodeKind::ErrPasswdmismatch { client } => Command::ERR_PASSWDMISMATCH {
+                client: self.get_value(client.clone()),
+            },
+            NodeKind::ErrNicknameinuse { client, nick } => Command::ERR_NICKNAMEINUSE {
+                client: self.get_value(client.clone()),
+                nick: self.get_value(nick.clone()),
             },
 
             _ => unreachable!(),
