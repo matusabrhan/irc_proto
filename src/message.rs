@@ -77,7 +77,7 @@ pub enum Command<'a> {
     },
 
     QUIT {
-        reason: &'a str,
+        reason: Option<&'a str>,
     },
 
     RPL_WELCOME {
@@ -172,7 +172,12 @@ impl<'a> Command<'a> {
                 Box::new([channels])
             }
 
-            Self::QUIT { reason } => Box::new([reason]),
+            Self::QUIT { reason } => {
+                if let Some(reason) = reason {
+                    return Box::new([reason]);
+                }
+                return Box::new([]);
+            }
 
             Self::RPL_WELCOME { client, text } => Box::new([client, text]),
             Self::RPL_YOURHOST { client, text } => Box::new([client, text]),
@@ -286,7 +291,10 @@ impl Message {
                 unused: self.get_value(unused.clone()),
                 realname: self.get_value(realname.clone()),
             },
-
+            NodeKind::CommandQuit { reason } => {
+                let reason = reason.as_ref().map(|reason| self.get_value(reason.clone()));
+                Command::QUIT { reason }
+            }
             NodeKind::CommandJoin { channels, keys } => {
                 let keys = match keys {
                     Some(keys) => Some(self.get_value(keys.clone())),
