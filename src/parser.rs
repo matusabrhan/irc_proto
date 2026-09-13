@@ -241,16 +241,23 @@ impl<'a> Parser<'a> {
 
     fn parse_command(&mut self) -> Result<NodeId, ()> {
         let start_token = self.next_token()?;
-        let command_str = self.input.get(
-            start_token.start() as usize..(start_token.start() + start_token.length()) as usize,
-        );
+        let command_str = match self
+            .input
+            .get(
+                start_token.start() as usize..(start_token.start() + start_token.length()) as usize,
+            )
+            .map(|s| s.to_uppercase())
+        {
+            Some(command) => command,
+            None => return Err(()),
+        };
 
         if self.current.kind() != TokenKind::Space {
             return Err(());
         }
         self.next_token()?;
-        match command_str {
-            Some(strings::PING) => {
+        match command_str.as_str() {
+            strings::PING => {
                 let token = self.parse_param()?;
 
                 Ok(self.store_node(
@@ -259,7 +266,7 @@ impl<'a> Parser<'a> {
                     self.current.start() - start_token.start(),
                 ))
             }
-            Some(strings::PONG) => {
+            strings::PONG => {
                 let param1 = self.parse_param()?;
                 if let Ok(param2) = self.parse_param() {
                     return Ok(self.store_node(
@@ -282,7 +289,7 @@ impl<'a> Parser<'a> {
                 ))
             }
 
-            Some(strings::CAP) => {
+            strings::CAP => {
                 let subcommand = self.parse_param()?;
                 let capabilities = self.parse_param().ok();
 
@@ -295,7 +302,7 @@ impl<'a> Parser<'a> {
                     self.current.start() - start_token.start(),
                 ))
             }
-            Some(strings::PASS) => {
+            strings::PASS => {
                 let password = self.parse_param()?;
                 Ok(self.store_node(
                     NodeKind::CommandPass { password },
@@ -303,7 +310,7 @@ impl<'a> Parser<'a> {
                     self.current.start() - start_token.start(),
                 ))
             }
-            Some(strings::NICK) => {
+            strings::NICK => {
                 let nickname = self.parse_param()?;
                 Ok(self.store_node(
                     NodeKind::CommandNick { nickname },
@@ -311,7 +318,7 @@ impl<'a> Parser<'a> {
                     self.current.start() - start_token.start(),
                 ))
             }
-            Some(strings::USER) => {
+            strings::USER => {
                 let user = self.parse_param()?;
                 let mode = self.parse_param()?;
                 let unused = self.parse_param()?;
@@ -328,7 +335,7 @@ impl<'a> Parser<'a> {
                     self.current.start() - start_token.start(),
                 ))
             }
-            Some(strings::QUIT) => {
+            strings::QUIT => {
                 let reason = self.parse_param().ok();
                 Ok(self.store_node(
                     NodeKind::CommandQuit { reason },
@@ -337,7 +344,7 @@ impl<'a> Parser<'a> {
                 ))
             }
 
-            Some(strings::JOIN) => {
+            strings::JOIN => {
                 let channels = self.parse_param()?;
                 let keys = self.parse_param().ok();
                 Ok(self.store_node(
@@ -346,7 +353,7 @@ impl<'a> Parser<'a> {
                     self.current.start() - start_token.start(),
                 ))
             }
-            Some(strings::PRIVMSG) => {
+            strings::PRIVMSG => {
                 let targets = self.parse_param()?;
                 let text = self.parse_param()?;
 
@@ -357,7 +364,7 @@ impl<'a> Parser<'a> {
                 ))
             }
 
-            Some(strings::RPL_WELCOME) => {
+            strings::RPL_WELCOME => {
                 let client = self.parse_param()?;
                 let text = self.parse_param()?;
 
@@ -367,7 +374,7 @@ impl<'a> Parser<'a> {
                     self.current.start() - start_token.start(),
                 ))
             }
-            Some(strings::RPL_YOURHOST) => {
+            strings::RPL_YOURHOST => {
                 let client = self.parse_param()?;
                 let text = self.parse_param()?;
 
@@ -377,7 +384,7 @@ impl<'a> Parser<'a> {
                     self.current.start() - start_token.start(),
                 ))
             }
-            Some(strings::RPL_CREATED) => {
+            strings::RPL_CREATED => {
                 let client = self.parse_param()?;
                 let text = self.parse_param()?;
 
@@ -387,7 +394,7 @@ impl<'a> Parser<'a> {
                     self.current.start() - start_token.start(),
                 ))
             }
-            Some(strings::RPL_MYINFO) => {
+            strings::RPL_MYINFO => {
                 let client = self.parse_param()?;
                 let servername = self.parse_param()?;
                 let version = self.parse_param()?;
@@ -407,7 +414,7 @@ impl<'a> Parser<'a> {
                 ))
             }
 
-            Some(strings::ERR_PASSWDMISMATCH) => {
+            strings::ERR_PASSWDMISMATCH => {
                 let client = self.parse_param()?;
 
                 Ok(self.store_node(
@@ -417,7 +424,7 @@ impl<'a> Parser<'a> {
                 ))
             }
 
-            Some(strings::ERR_NICKNAMEINUSE) => {
+            strings::ERR_NICKNAMEINUSE => {
                 let client = self.parse_param()?;
                 let nick = self.parse_param()?;
 
