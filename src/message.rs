@@ -34,9 +34,9 @@ pub struct Tag<'a> {
 
 #[derive(Debug)]
 pub struct Source<'a> {
-    name: &'a str,
-    user: Option<&'a str>,
-    host: Option<&'a str>,
+    pub name: &'a str,
+    pub user: Option<&'a str>,
+    pub host: Option<&'a str>,
 }
 
 #[derive(Debug, PartialEq)]
