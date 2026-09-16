@@ -176,7 +176,7 @@ impl<'a> Command<'a> {
                 if let Some(reason) = reason {
                     return Box::new([reason]);
                 }
-                return Box::new([]);
+                Box::new([])
             }
 
             Self::RPL_WELCOME { client, text } => Box::new([client, text]),
