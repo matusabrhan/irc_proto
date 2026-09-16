@@ -4,6 +4,7 @@ use crate::{
     ast::{Node, NodeId, NodeKind},
     parser::Parser,
     strings::*,
+    IrcError,
 };
 
 #[derive(Debug, Clone)]
@@ -80,19 +81,19 @@ pub enum Command<'a> {
         reason: Option<&'a str>,
     },
 
-    RPL_WELCOME {
+    RPLWELCOME {
         client: &'a str,
         text: &'a str,
     },
-    RPL_YOURHOST {
+    RPLYOURHOST {
         client: &'a str,
         text: &'a str,
     },
-    RPL_CREATED {
+    RPLCREATED {
         client: &'a str,
         text: &'a str,
     },
-    RPL_MYINFO {
+    RPLMYINFO {
         client: &'a str,
         servername: &'a str,
         version: &'a str,
@@ -101,11 +102,11 @@ pub enum Command<'a> {
         //TODO: channel_modes_wiht_params
     },
 
-    ERR_PASSWDMISMATCH {
+    ERRPASSWDMISMATCH {
         client: &'a str,
     },
 
-    ERR_NICKNAMEINUSE {
+    ERRNICKNAMEINUSE {
         client: &'a str,
         nick: &'a str,
     },
@@ -126,13 +127,13 @@ impl<'a> Command<'a> {
             Self::JOIN { .. } => JOIN,
             Self::PRIVMSG { .. } => PRIVMSG,
 
-            Self::RPL_WELCOME { .. } => RPL_WELCOME,
-            Self::RPL_YOURHOST { .. } => RPL_YOURHOST,
-            Self::RPL_CREATED { .. } => RPL_CREATED,
-            Self::RPL_MYINFO { .. } => RPL_MYINFO,
+            Self::RPLWELCOME { .. } => RPL_WELCOME,
+            Self::RPLYOURHOST { .. } => RPL_YOURHOST,
+            Self::RPLCREATED { .. } => RPL_CREATED,
+            Self::RPLMYINFO { .. } => RPL_MYINFO,
 
-            Self::ERR_PASSWDMISMATCH { .. } => ERR_PASSWDMISMATCH,
-            Self::ERR_NICKNAMEINUSE { .. } => ERR_NICKNAMEINUSE,
+            Self::ERRPASSWDMISMATCH { .. } => ERR_PASSWDMISMATCH,
+            Self::ERRNICKNAMEINUSE { .. } => ERR_NICKNAMEINUSE,
         }
     }
 
@@ -179,10 +180,10 @@ impl<'a> Command<'a> {
                 Box::new([])
             }
 
-            Self::RPL_WELCOME { client, text } => Box::new([client, text]),
-            Self::RPL_YOURHOST { client, text } => Box::new([client, text]),
-            Self::RPL_CREATED { client, text } => Box::new([client, text]),
-            Self::RPL_MYINFO {
+            Self::RPLWELCOME { client, text } => Box::new([client, text]),
+            Self::RPLYOURHOST { client, text } => Box::new([client, text]),
+            Self::RPLCREATED { client, text } => Box::new([client, text]),
+            Self::RPLMYINFO {
                 client,
                 servername,
                 version,
@@ -190,8 +191,8 @@ impl<'a> Command<'a> {
                 channel_modes,
             } => Box::new([client, servername, version, user_modes, channel_modes]),
 
-            Self::ERR_PASSWDMISMATCH { client } => Box::new([client]),
-            Self::ERR_NICKNAMEINUSE { client, nick } => Box::new([client, nick]),
+            Self::ERRPASSWDMISMATCH { client } => Box::new([client]),
+            Self::ERRNICKNAMEINUSE { client, nick } => Box::new([client, nick]),
         }
     }
 }
@@ -204,15 +205,21 @@ pub struct MessageBuilder<'a> {
 }
 
 impl Message {
-    pub fn new(input: &[u8]) -> Result<Self, usize> {
+    pub fn new(input: &[u8]) -> Result<Self, IrcError> {
         let text = String::from_utf8(input.to_vec())
-            .map_err(|_| input.len())?
+            .map_err(|_| IrcError::ParseError {
+                message_end: input.len(),
+            })?
             .into_boxed_str();
 
         let mut parser = Parser::new(text.as_ref());
         let root = match parser.parse_message() {
             Ok(root) => root,
-            Err(()) => return Err(parser.end_of_message().unwrap_or(text.len())),
+            Err(()) => {
+                return Err(IrcError::ParseError {
+                    message_end: parser.end_of_message().unwrap_or(text.len()),
+                })
+            }
         };
         let nodes = Nodes(parser.get_nodes());
 
@@ -232,7 +239,9 @@ impl Message {
                     nodes,
                 })
             }
-            _ => Err(text.len()),
+            _ => Err(IrcError::ParseError {
+                message_end: text.len(),
+            }),
         }
     }
 
@@ -296,13 +305,13 @@ impl Message {
                 Command::QUIT { reason }
             }
             NodeKind::CommandJoin { channels, keys } => {
-                let keys = match keys {
-                    Some(keys) => Some(self.get_value(keys.clone())),
-                    None => None,
-                };
+                // let keys = match keys {
+                //     Some(keys) => Some(self.get_value(keys.clone())),
+                //     None => None,
+                // };
                 Command::JOIN {
                     channels: self.get_value(channels.clone()),
-                    keys,
+                    keys: keys.as_ref().map(|keys| self.get_value(keys.clone())),
                 }
             }
             NodeKind::CommandPrivMsg { targets, text } => Command::PRIVMSG {
@@ -310,15 +319,15 @@ impl Message {
                 text: self.get_value(text.clone()),
             },
 
-            NodeKind::RplWelcome { client, text } => Command::RPL_WELCOME {
+            NodeKind::RplWelcome { client, text } => Command::RPLWELCOME {
                 client: self.get_value(client.clone()),
                 text: self.get_value(text.clone()),
             },
-            NodeKind::RplYourhost { client, text } => Command::RPL_YOURHOST {
+            NodeKind::RplYourhost { client, text } => Command::RPLYOURHOST {
                 client: self.get_value(client.clone()),
                 text: self.get_value(text.clone()),
             },
-            NodeKind::RplCreated { client, text } => Command::RPL_CREATED {
+            NodeKind::RplCreated { client, text } => Command::RPLCREATED {
                 client: self.get_value(client.clone()),
                 text: self.get_value(text.clone()),
             },
@@ -328,7 +337,7 @@ impl Message {
                 version,
                 user_modes,
                 channel_modes,
-            } => Command::RPL_MYINFO {
+            } => Command::RPLMYINFO {
                 client: self.get_value(client.clone()),
                 servername: self.get_value(servername.clone()),
                 version: self.get_value(version.clone()),
@@ -336,10 +345,10 @@ impl Message {
                 channel_modes: self.get_value(channel_modes.clone()),
             },
 
-            NodeKind::ErrPasswdmismatch { client } => Command::ERR_PASSWDMISMATCH {
+            NodeKind::ErrPasswdmismatch { client } => Command::ERRPASSWDMISMATCH {
                 client: self.get_value(client.clone()),
             },
-            NodeKind::ErrNicknameinuse { client, nick } => Command::ERR_NICKNAMEINUSE {
+            NodeKind::ErrNicknameinuse { client, nick } => Command::ERRNICKNAMEINUSE {
                 client: self.get_value(client.clone()),
                 nick: self.get_value(nick.clone()),
             },

@@ -1,3 +1,5 @@
+use crate::parser::Parser;
+
 pub mod ast;
 pub mod connection;
 pub mod lexer;
@@ -10,6 +12,12 @@ compile_error!("features `std-stream` and `tokio-stream` are mutually exclusive"
 
 #[cfg(not(any(feature = "std-stream", feature = "tokio-stream")))]
 compile_error!("enable either `std-stream` or `tokio-stream`");
+
+#[derive(Debug)]
+pub enum IrcError {
+    ParseError { message_end: usize },
+    ConnectionError,
+}
 
 pub mod strings {
     pub const PING: &str = "PING";
@@ -57,4 +65,19 @@ pub fn enable_logging() {
         std::env::set_var("RUST_LOG", "debug");
     }
     env_logger::try_init();
+}
+
+pub fn is_valid_command(input: &str) -> bool {
+    let mut parser = Parser::new(input);
+    parser.parse_command().is_ok()
+}
+
+pub fn is_valid_source(input: &str) -> bool {
+    let mut parser = Parser::new(input);
+    parser.parse_source().is_ok()
+}
+
+pub fn is_valid_tags(input: &str) -> bool {
+    let mut parser = Parser::new(input);
+    parser.parse_tags().is_ok()
 }

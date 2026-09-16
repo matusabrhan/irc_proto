@@ -26,7 +26,7 @@ pub(crate) enum TokenKind {
     Dash,
     Minus,
     Plus,
-    EOM,
+    EndOfMessage,
     #[default]
     Invalid,
 }

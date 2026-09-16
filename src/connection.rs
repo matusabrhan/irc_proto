@@ -4,13 +4,9 @@ use std::io::{Read, Write};
 #[cfg(feature = "tokio-stream")]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-#[derive(Debug)]
-pub enum ConnectionError {
-    IOError,
-    ParsingError,
-}
-
 use crate::message::Message;
+#[cfg(feature = "tokio-stream")]
+use crate::IrcError;
 
 #[derive(Debug)]
 pub struct Connection {
@@ -84,13 +80,13 @@ impl Connection {
         }
     }
 
-    pub async fn read(&mut self) -> Result<Message, ConnectionError> {
+    pub async fn read(&mut self) -> Result<Message, IrcError> {
         if self.cursor >= self.length {
             self.length = self
                 .stream
                 .read(&mut self.buffer)
                 .await
-                .map_err(|_| ConnectionError::IOError)?;
+                .map_err(|_| IrcError::ConnectionError)?;
             self.cursor = 0;
         }
 
@@ -99,24 +95,29 @@ impl Connection {
                 self.cursor += message.contents().len();
                 Ok(message)
             }
-            Err(end) => {
-                self.cursor += end;
-                Err(ConnectionError::ParsingError)
+            Err(IrcError::ParseError { message_end }) => {
+                self.cursor += message_end;
+                Err(IrcError::ParseError { message_end })
             }
+            Err(_) => unreachable!(),
         }
     }
 
-    pub async fn write(&mut self, msg: Message) -> Result<(), ConnectionError> {
+    pub async fn write(&mut self, msg: Message) -> Result<(), IrcError> {
         self.stream
             .write(msg.contents().as_bytes())
             .await
-            .map_err(|_| ConnectionError::IOError)?;
+            .map_err(|_| IrcError::ConnectionError)?;
 
         Ok(())
     }
 
-    pub async fn close(&mut self) -> Result<(), ()> {
-        self.stream.shutdown().await.map_err(|_| ())?;
+    pub async fn close(&mut self) -> Result<(), IrcError> {
+        self.stream
+            .shutdown()
+            .await
+            .map_err(|_| ())
+            .map_err(|_| IrcError::ConnectionError)?;
         Ok(())
     }
 }

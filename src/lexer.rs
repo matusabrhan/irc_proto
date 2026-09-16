@@ -82,11 +82,11 @@ impl<'a> Lexer<'a> {
             PLUS => Token::new(TokenKind::Plus, self.cursor, 1),
 
             CR => match self.peek.eq(&LF) {
-                true => return Token::new(TokenKind::EOM, self.cursor, 2),
-                false => return Token::new(TokenKind::EOM, self.cursor, 1),
+                true => return Token::new(TokenKind::EndOfMessage, self.cursor, 2),
+                false => return Token::new(TokenKind::EndOfMessage, self.cursor, 1),
             },
 
-            LF => return Token::new(TokenKind::EOM, self.cursor, 1),
+            LF => return Token::new(TokenKind::EndOfMessage, self.cursor, 1),
 
             c if c.is_alphanumeric() => {
                 let start = self.cursor;
@@ -122,8 +122,14 @@ mod tests {
         assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 7, 5));
         assert_eq!(lexer.next_token(), Token::new(TokenKind::Space, 12, 1));
         assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 13, 7));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::EOM, 20, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::EOM, 20, 1));
+        assert_eq!(
+            lexer.next_token(),
+            Token::new(TokenKind::EndOfMessage, 20, 1)
+        );
+        assert_eq!(
+            lexer.next_token(),
+            Token::new(TokenKind::EndOfMessage, 20, 1)
+        );
     }
 
     #[test]
@@ -160,7 +166,10 @@ mod tests {
         assert_eq!(lexer.next_token(), Token::new(TokenKind::Space, 52, 1));
         assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 53, 2));
         assert_eq!(lexer.next_token(), Token::new(TokenKind::Bang, 55, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::EOM, 56, 2));
+        assert_eq!(
+            lexer.next_token(),
+            Token::new(TokenKind::EndOfMessage, 56, 2)
+        );
     }
 
     #[test]

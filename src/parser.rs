@@ -42,7 +42,7 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn end_of_message(&mut self) -> Option<usize> {
         loop {
-            if let TokenKind::EOM = self.current.kind() {
+            if let TokenKind::EndOfMessage = self.current.kind() {
                 return Some((self.current.start() + self.current.length()) as usize);
             }
             self.next_token().ok()?;
@@ -70,7 +70,7 @@ impl<'a> Parser<'a> {
 
         let command = self.parse_command()?;
 
-        if self.current.kind() != TokenKind::EOM {
+        if self.current.kind() != TokenKind::EndOfMessage {
             return Err(());
         }
 
@@ -85,7 +85,7 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    fn parse_tags(&mut self) -> Result<NodeId, ()> {
+    pub(crate) fn parse_tags(&mut self) -> Result<NodeId, ()> {
         let start_token = self.next_token()?;
 
         let mut tag_node_ids = Vec::new();
@@ -127,7 +127,10 @@ impl<'a> Parser<'a> {
         let start_token = self.next_token()?;
         loop {
             match self.current.kind() {
-                TokenKind::EOM | TokenKind::Space | TokenKind::Equals | TokenKind::Semicolon => {
+                TokenKind::EndOfMessage
+                | TokenKind::Space
+                | TokenKind::Equals
+                | TokenKind::Semicolon => {
                     return Ok(self.store_node(
                         NodeKind::TagKey,
                         start_token.start(),
@@ -147,7 +150,7 @@ impl<'a> Parser<'a> {
         let start_token = self.next_token()?;
         loop {
             match self.current.kind() {
-                TokenKind::EOM | TokenKind::Space | TokenKind::Semicolon => {
+                TokenKind::EndOfMessage | TokenKind::Space | TokenKind::Semicolon => {
                     return Ok(self.store_node(
                         NodeKind::TagValue,
                         start_token.start(),
@@ -159,7 +162,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_source(&mut self) -> Result<NodeId, ()> {
+    pub(crate) fn parse_source(&mut self) -> Result<NodeId, ()> {
         let start_token = self.next_token()?;
 
         let name = self.parse_source_name()?;
@@ -189,7 +192,7 @@ impl<'a> Parser<'a> {
         let start_token = self.next_token()?;
         loop {
             match self.current.kind() {
-                TokenKind::EOM | TokenKind::Space | TokenKind::Bang | TokenKind::At => {
+                TokenKind::EndOfMessage | TokenKind::Space | TokenKind::Bang | TokenKind::At => {
                     return Ok(self.store_node(
                         NodeKind::SourceName,
                         start_token.start(),
@@ -208,7 +211,7 @@ impl<'a> Parser<'a> {
         let start_token = self.next_token()?;
         loop {
             match self.current.kind() {
-                TokenKind::EOM | TokenKind::Space | TokenKind::At => {
+                TokenKind::EndOfMessage | TokenKind::Space | TokenKind::At => {
                     return Ok(self.store_node(
                         NodeKind::SourceUser,
                         start_token.start(),
@@ -225,7 +228,7 @@ impl<'a> Parser<'a> {
         let start_token = self.next_token()?;
         loop {
             match self.current.kind() {
-                TokenKind::EOM | TokenKind::Space => {
+                TokenKind::EndOfMessage | TokenKind::Space => {
                     return Ok(self.store_node(
                         NodeKind::SourceHost,
                         start_token.start(),
@@ -239,7 +242,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_command(&mut self) -> Result<NodeId, ()> {
+    pub(crate) fn parse_command(&mut self) -> Result<NodeId, ()> {
         let start_token = self.next_token()?;
         let command_str = match self
             .input
@@ -462,7 +465,7 @@ impl<'a> Parser<'a> {
                     return Ok(param);
                 }
 
-                TokenKind::EOM => {
+                TokenKind::EndOfMessage => {
                     return Ok(self.store_node(
                         NodeKind::Parameter,
                         start_token.start(),
@@ -477,7 +480,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn get_nodes(self) -> Box<[Node]> {
+    pub(crate) fn get_nodes(self) -> Box<[Node]> {
         self.nodes.into_boxed_slice()
     }
 }
