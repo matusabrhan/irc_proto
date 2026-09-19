@@ -16,6 +16,7 @@ compile_error!("enable either `std-stream` or `tokio-stream`");
 #[derive(Debug)]
 pub enum IrcError {
     ParseError { message_end: usize },
+    MissingEndOfMessage,
     ConnectionError,
 }
 

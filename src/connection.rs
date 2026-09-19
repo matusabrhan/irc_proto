@@ -7,25 +7,26 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::message::Message;
 use crate::IrcError;
 
+const MAX_MESSAGE_SIZE: usize = 512;
+const BUFFER_SIZE: usize = 1024 * 2;
+
 #[derive(Debug)]
 pub struct Connection {
     #[cfg(feature = "std-stream")]
     stream: std::net::TcpStream,
     #[cfg(feature = "tokio-stream")]
     stream: tokio::net::TcpStream,
-    buffer: [u8; Self::BUFFER_SIZE],
+    buffer: [u8; BUFFER_SIZE],
     length: usize,
     cursor: usize,
 }
 
 #[cfg(feature = "std-stream")]
 impl Connection {
-    const BUFFER_SIZE: usize = 1024 * 2;
-
     pub fn new(stream: std::net::TcpStream) -> Self {
         Self {
             stream,
-            buffer: [0; Self::BUFFER_SIZE],
+            buffer: [0; BUFFER_SIZE],
             length: 0,
             cursor: 0,
         }
@@ -69,12 +70,10 @@ impl Connection {
 
 #[cfg(feature = "tokio-stream")]
 impl Connection {
-    const BUFFER_SIZE: usize = 1024 * 2;
-
     pub fn new(stream: tokio::net::TcpStream) -> Self {
         Self {
             stream,
-            buffer: [0; Self::BUFFER_SIZE],
+            buffer: [0; BUFFER_SIZE],
             length: 0,
             cursor: 0,
         }
@@ -82,24 +81,50 @@ impl Connection {
 
     pub async fn read(&mut self) -> Result<Message, IrcError> {
         if self.cursor >= self.length {
-            self.length = self
+            self.length = match self
                 .stream
                 .read(&mut self.buffer)
                 .await
-                .map_err(|_| IrcError::ConnectionError)?;
+                .map_err(|_| IrcError::ConnectionError)?
+            {
+                0 => return Err(IrcError::ConnectionError),
+                n => n,
+            };
             self.cursor = 0;
         }
 
-        match Message::new(&self.buffer[self.cursor..self.length]) {
-            Ok(message) => {
-                self.cursor += message.contents().len();
-                Ok(message)
-            }
-            Err(IrcError::ParseError { message_end }) => {
-                self.cursor += message_end;
-                Err(IrcError::ParseError { message_end })
-            }
-            Err(_) => unreachable!(),
+        loop {
+            match Message::new(&self.buffer[self.cursor..self.length]) {
+                Ok(message) => {
+                    self.cursor += message.contents().len();
+                    return Ok(message);
+                }
+                Err(IrcError::ParseError { message_end }) => {
+                    self.cursor += message_end;
+                    return Err(IrcError::ParseError { message_end });
+                }
+                Err(IrcError::MissingEndOfMessage) => {
+                    if self.cursor > 0 {
+                        self.buffer.copy_within(self.cursor..self.length, 0);
+                        self.length -= self.cursor;
+                        self.cursor = 0
+                    }
+                    if self.length >= MAX_MESSAGE_SIZE {
+                        self.cursor = self.length;
+                        return Err(IrcError::MissingEndOfMessage);
+                    }
+                    self.length += match self
+                        .stream
+                        .read(&mut self.buffer[self.length..])
+                        .await
+                        .map_err(|_| IrcError::ConnectionError)?
+                    {
+                        0 => return Err(IrcError::ConnectionError),
+                        n => n,
+                    };
+                }
+                Err(IrcError::ConnectionError) => unreachable!(),
+            };
         }
     }
 
@@ -199,5 +224,147 @@ mod tests {
             "PASS password\r\nUSER username_user1 0 * realname_user1\r\nNICK nick1\r\n",
             buf
         );
+    }
+}
+
+#[cfg(feature = "tokio-stream")]
+#[cfg(test)]
+mod tests {
+    use super::Connection;
+    use crate::{
+        enable_logging,
+        message::{Command, Message, MessageBuilder},
+        IrcError,
+    };
+    use log::info;
+    use std::{net::SocketAddr, time::Duration};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+        time::sleep,
+    };
+
+    async fn start_listen() -> (TcpListener, SocketAddr) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        info!("Server listening on {}", addr);
+        return (listener, addr);
+    }
+
+    #[tokio::test]
+    async fn test_connection_write1() {
+        let (listener, _) = start_listen().await;
+        let stream = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        let mut client = Connection::new(stream);
+
+        let message = MessageBuilder::with_command(Command::PRIVMSG {
+            targets: "#chan",
+            text: "Hello",
+        })
+        .build()
+        .unwrap();
+        client.write(message).await.unwrap();
+        client.close().await;
+
+        let mut res = String::new();
+        server.read_to_string(&mut res).await.unwrap();
+
+        assert_eq!("PRIVMSG #chan Hello\r\n", res);
+        server.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_connection_write2() {
+        let (listener, _) = start_listen().await;
+        let stream = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        let mut client = Connection::new(stream);
+        let message = MessageBuilder::with_command(Command::PRIVMSG {
+            targets: "#chan",
+            text: "Hello",
+        })
+        .build()
+        .unwrap();
+        client.write(message.clone()).await.unwrap();
+        client.write(message).await.unwrap();
+        client.close().await;
+
+        let mut res = String::new();
+        server.read_to_string(&mut res).await.unwrap();
+
+        assert_eq!("PRIVMSG #chan Hello\r\nPRIVMSG #chan Hello\r\n", res);
+        server.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_connection_read1() {
+        let (listener, _) = start_listen().await;
+        let stream = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        let mut client = Connection::new(stream);
+
+        server.write_all(b"PRIVMSG #chan Hello\r\n").await.unwrap();
+
+        assert_eq!(
+            "PRIVMSG #chan Hello\r\n",
+            client.read().await.unwrap().contents(),
+        );
+        client.close().await;
+        server.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_connection_read2() {
+        let (listener, _) = start_listen().await;
+        let stream = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        let mut client = Connection::new(stream);
+
+        server.write_all(b"PRIVMSG #chan Hello\r\n").await.unwrap();
+        server.write_all(b"PRIVMSG #chan Hello\r\n").await.unwrap();
+
+        let mut msg = String::new();
+        msg.push_str(client.read().await.unwrap().contents());
+        msg.push_str(client.read().await.unwrap().contents());
+
+        assert_eq!("PRIVMSG #chan Hello\r\nPRIVMSG #chan Hello\r\n", msg);
+        client.close().await;
+        server.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_connection_read3() {
+        let (listener, _) = start_listen().await;
+        let stream = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        let mut client = Connection::new(stream);
+
+        server.write_all(b"PRIVMSG ").await.unwrap();
+        tokio::spawn(async move {
+            // sleep(Duration::from_secs(1)).await;
+            server.write_all(b"#ch").await.unwrap();
+            // sleep(Duration::from_secs(1)).await;
+            server.write_all(b"an Hello\r\n").await.unwrap();
+
+            sleep(Duration::from_secs(1)).await;
+            server.shutdown().await.unwrap();
+        });
+
+        assert_eq!(
+            "PRIVMSG #chan Hello\r\n",
+            client.read().await.unwrap().contents(),
+        );
+        client.close().await;
     }
 }

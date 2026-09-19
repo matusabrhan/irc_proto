@@ -216,9 +216,11 @@ impl Message {
         let root = match parser.parse_message() {
             Ok(root) => root,
             Err(()) => {
-                return Err(IrcError::ParseError {
-                    message_end: parser.end_of_message().unwrap_or(text.len()),
-                })
+                let error = match parser.end_of_message() {
+                    Some(n) => IrcError::ParseError { message_end: n },
+                    None => IrcError::MissingEndOfMessage,
+                };
+                return Err(error);
             }
         };
         let nodes = Nodes(parser.get_nodes());
