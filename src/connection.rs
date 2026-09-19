@@ -56,7 +56,7 @@ impl Connection {
 
     pub fn write(&mut self, msg: Message) -> Result<(), IrcError> {
         self.stream
-            .write(msg.contents().as_bytes())
+            .write_all(msg.contents().as_bytes())
             .map_err(|_| IrcError::ConnectionError)?;
         Ok(())
     }
@@ -130,7 +130,7 @@ impl Connection {
 
     pub async fn write(&mut self, msg: Message) -> Result<(), IrcError> {
         self.stream
-            .write(msg.contents().as_bytes())
+            .write_all(msg.contents().as_bytes())
             .await
             .map_err(|_| IrcError::ConnectionError)?;
 
@@ -231,11 +231,7 @@ mod tests {
 #[cfg(test)]
 mod tests {
     use super::Connection;
-    use crate::{
-        enable_logging,
-        message::{Command, Message, MessageBuilder},
-        IrcError,
-    };
+    use crate::message::{Command, MessageBuilder};
     use log::info;
     use std::{net::SocketAddr, time::Duration};
     use tokio::{
@@ -352,9 +348,7 @@ mod tests {
 
         server.write_all(b"PRIVMSG ").await.unwrap();
         tokio::spawn(async move {
-            // sleep(Duration::from_secs(1)).await;
             server.write_all(b"#ch").await.unwrap();
-            // sleep(Duration::from_secs(1)).await;
             server.write_all(b"an Hello\r\n").await.unwrap();
 
             sleep(Duration::from_secs(1)).await;
