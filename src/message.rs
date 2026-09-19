@@ -113,7 +113,7 @@ pub enum Command<'a> {
 }
 
 impl<'a> Command<'a> {
-    fn command(&self) -> &str {
+    pub fn command(&self) -> &str {
         match self {
             Self::PING { .. } => PING,
             Self::PONG { .. } => PONG,
@@ -137,7 +137,7 @@ impl<'a> Command<'a> {
         }
     }
 
-    fn params(&self) -> Box<[&str]> {
+    pub fn params(&self) -> Box<[&str]> {
         match self {
             Self::PING { token } => Box::new([token]),
             Self::PONG { server, token } => {

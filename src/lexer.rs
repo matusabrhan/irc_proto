@@ -26,12 +26,9 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_char(&mut self) {
-        match self.current != char::MIN {
-            true => {
-                self.current = self.peek;
-                self.peek = self.input.next().unwrap_or(char::MIN)
-            }
-            false => self.current = char::MIN,
+        if self.current != char::MIN {
+            self.current = self.peek;
+            self.peek = self.input.next().unwrap_or(char::MIN)
         }
         self.cursor = self.read_cursor;
         self.read_cursor = self.read_cursor.saturating_add(1);
