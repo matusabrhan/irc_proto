@@ -5,7 +5,6 @@ use std::io::{Read, Write};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::message::Message;
-#[cfg(feature = "tokio-stream")]
 use crate::IrcError;
 
 #[derive(Debug)]
@@ -32,12 +31,12 @@ impl Connection {
         }
     }
 
-    pub fn read(&mut self) -> Result<Message, ConnectionError> {
+    pub fn read(&mut self) -> Result<Message, IrcError> {
         if self.cursor >= self.length {
             self.length = self
                 .stream
                 .read(&mut self.buffer)
-                .map_err(|_| ConnectionError::IOError)?;
+                .map_err(|_| IrcError::ConnectionError)?;
             self.cursor = 0;
         }
 
@@ -46,17 +45,18 @@ impl Connection {
                 self.cursor += message.contents().len();
                 Ok(message)
             }
-            Err(end) => {
-                self.cursor += end;
-                Err(ConnectionError::ParsingError)
+            Err(IrcError::ParseError { message_end }) => {
+                self.cursor += message_end;
+                Err(IrcError::ParseError { message_end })
             }
+            Err(_) => unreachable!(),
         }
     }
 
-    pub fn write(&mut self, msg: Message) -> Result<(), ConnectionError> {
+    pub fn write(&mut self, msg: Message) -> Result<(), IrcError> {
         self.stream
             .write(msg.contents().as_bytes())
-            .map_err(|_| ConnectionError::IOError)?;
+            .map_err(|_| IrcError::ConnectionError)?;
         Ok(())
     }
 
