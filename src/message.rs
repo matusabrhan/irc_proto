@@ -137,62 +137,80 @@ impl<'a> Command<'a> {
         }
     }
 
-    pub fn params(&self) -> Box<[&str]> {
+    pub fn params(&self) -> Params<'a> {
         match self {
-            Self::PING { token } => Box::new([token]),
-            Self::PONG { server, token } => {
-                if let Some(server) = server {
-                    return Box::new([server, token]);
-                }
-                Box::new([token])
-            }
+            Self::PING { token } => Params::One([*token].into_iter()),
+            Self::PONG { server, token } => match server {
+                Some(server) => Params::Two([*server, *token].into_iter()),
+                None => Params::One([*token].into_iter()),
+            },
 
             Self::CAP {
                 subcommand,
                 capabilities,
-            } => {
-                if let Some(capabilities) = capabilities {
-                    return Box::new([subcommand, capabilities]);
-                }
-                Box::new([subcommand])
-            }
-            Self::PASS { password } => Box::new([password]),
-            Self::NICK { nickname } => Box::new([nickname]),
+            } => match capabilities {
+                Some(capabilities) => Params::Two([*subcommand, *capabilities].into_iter()),
+                None => Params::One([*subcommand].into_iter()),
+            },
+            Self::PASS { password } => Params::One([*password].into_iter()),
+            Self::NICK { nickname } => Params::One([*nickname].into_iter()),
             Self::USER {
                 user,
                 mode,
                 unused,
                 realname,
-            } => Box::new([user, mode, unused, realname]),
+            } => Params::Four([*user, *mode, *unused, *realname].into_iter()),
 
-            Self::PRIVMSG { targets, text } => Box::new([targets, text]),
-            Self::JOIN { channels, keys } => {
-                if let Some(keys) = keys {
-                    return Box::new([channels, keys]);
-                }
-                Box::new([channels])
-            }
+            Self::PRIVMSG { targets, text } => Params::Two([*targets, *text].into_iter()),
+            Self::JOIN { channels, keys } => match keys {
+                Some(keys) => Params::Two([*channels, *keys].into_iter()),
+                None => Params::One([*channels].into_iter()),
+            },
 
-            Self::QUIT { reason } => {
-                if let Some(reason) = reason {
-                    return Box::new([reason]);
-                }
-                Box::new([])
-            }
+            Self::QUIT { reason } => match reason {
+                Some(reason) => Params::One([*reason].into_iter()),
+                None => Params::Empty,
+            },
 
-            Self::RPLWELCOME { client, text } => Box::new([client, text]),
-            Self::RPLYOURHOST { client, text } => Box::new([client, text]),
-            Self::RPLCREATED { client, text } => Box::new([client, text]),
+            Self::RPLWELCOME { client, text } => Params::Two([*client, *text].into_iter()),
+            Self::RPLYOURHOST { client, text } => Params::Two([*client, *text].into_iter()),
+            Self::RPLCREATED { client, text } => Params::Two([*client, *text].into_iter()),
             Self::RPLMYINFO {
                 client,
                 servername,
                 version,
                 user_modes,
                 channel_modes,
-            } => Box::new([client, servername, version, user_modes, channel_modes]),
+            } => Params::Five(
+                [*client, *servername, *version, *user_modes, *channel_modes].into_iter(),
+            ),
 
-            Self::ERRPASSWDMISMATCH { client } => Box::new([client]),
-            Self::ERRNICKNAMEINUSE { client, nick } => Box::new([client, nick]),
+            Self::ERRPASSWDMISMATCH { client } => Params::One([*client].into_iter()),
+            Self::ERRNICKNAMEINUSE { client, nick } => Params::Two([*client, *nick].into_iter()),
+        }
+    }
+}
+
+pub enum Params<'a> {
+    Empty,
+    One(std::array::IntoIter<&'a str, 1>),
+    Two(std::array::IntoIter<&'a str, 2>),
+    Three(std::array::IntoIter<&'a str, 3>),
+    Four(std::array::IntoIter<&'a str, 4>),
+    Five(std::array::IntoIter<&'a str, 5>),
+}
+
+impl<'a> Iterator for Params<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Empty => None,
+            Self::One(iter) => iter.next(),
+            Self::Two(iter) => iter.next(),
+            Self::Three(iter) => iter.next(),
+            Self::Four(iter) => iter.next(),
+            Self::Five(iter) => iter.next(),
         }
     }
 }
