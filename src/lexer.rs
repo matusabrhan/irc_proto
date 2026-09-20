@@ -1,4 +1,4 @@
-use std::str::Chars;
+use std::slice::Iter;
 
 use crate::{
     strings::*,
@@ -6,42 +6,43 @@ use crate::{
 };
 
 pub(crate) struct Lexer<'a> {
-    input: Chars<'a>,
+    input: Iter<'a, u8>,
     cursor: u16,
     read_cursor: u16,
-    peek: char,
-    current: char,
+    peek: &'a u8,
+    current: &'a u8,
 }
 
 impl<'a> Lexer<'a> {
     pub(crate) fn new(input: &'a str) -> Self {
-        let mut input = input.chars();
+        // let mut input = input.chars();
+        let mut input = input.as_bytes().iter();
         Self {
             cursor: 0,
             read_cursor: 1,
-            current: input.next().unwrap_or(char::MIN),
-            peek: input.next().unwrap_or(char::MIN),
+            current: input.next().unwrap_or(&u8::MIN),
+            peek: input.next().unwrap_or(&u8::MIN),
             input,
         }
     }
 
     fn read_char(&mut self) {
-        if self.current != char::MIN {
+        if *self.current != u8::MIN {
             self.current = self.peek;
-            self.peek = self.input.next().unwrap_or(char::MIN)
+            self.peek = self.input.next().unwrap_or(&u8::MIN)
         }
         self.cursor = self.read_cursor;
         self.read_cursor = self.read_cursor.saturating_add(1);
     }
 
     fn read_string(&mut self) {
-        while self.peek.is_alphanumeric() {
+        while self.peek.is_ascii_alphanumeric() {
             self.read_char();
         }
     }
 
     pub(crate) fn next_token(&mut self) -> Token {
-        let token = match self.current {
+        let token = match *self.current {
             SPACE => Token::new(TokenKind::Space, self.cursor, 1),
 
             AT => Token::new(TokenKind::At, self.cursor, 1),
@@ -85,7 +86,7 @@ impl<'a> Lexer<'a> {
 
             LF => return Token::new(TokenKind::EndOfMessage, self.cursor, 1),
 
-            c if c.is_alphanumeric() => {
+            c if c.is_ascii_alphanumeric() => {
                 let start = self.cursor;
                 self.read_string();
                 let stop = self.read_cursor;

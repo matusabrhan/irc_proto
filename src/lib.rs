@@ -39,26 +39,26 @@ pub mod strings {
     pub const ERR_PASSWDMISMATCH: &str = "464";
     pub const ERR_NICKNAMEINUSE: &str = "433";
 
-    pub const CR: char = '\r';
-    pub const LF: char = '\n';
-    pub const AT: char = '@';
-    pub const COLON: char = ':';
-    pub const SEMICOLON: char = ';';
-    pub const SPACE: char = ' ';
-    pub const LESSER: char = '<';
-    pub const EQUALS: char = '=';
-    pub const GREATER: char = '>';
-    pub const BANG: char = '!';
-    pub const SINGLE_QUOTE: char = '\'';
-    pub const DOUBLE_QUOTE: char = '"';
-    pub const SLASH: char = '/';
-    pub const HASH: char = '#';
-    pub const STAR: char = '*';
-    pub const PERIOD: char = '.';
-    pub const COMMA: char = ',';
-    pub const DASH: char = '_';
-    pub const MINUS: char = '-';
-    pub const PLUS: char = '+';
+    pub const CR: u8 = b'\r';
+    pub const LF: u8 = b'\n';
+    pub const AT: u8 = b'@';
+    pub const COLON: u8 = b':';
+    pub const SEMICOLON: u8 = b';';
+    pub const SPACE: u8 = b' ';
+    pub const LESSER: u8 = b'<';
+    pub const EQUALS: u8 = b'=';
+    pub const GREATER: u8 = b'>';
+    pub const BANG: u8 = b'!';
+    pub const SINGLE_QUOTE: u8 = b'\'';
+    pub const DOUBLE_QUOTE: u8 = b'"';
+    pub const SLASH: u8 = b'/';
+    pub const HASH: u8 = b'#';
+    pub const STAR: u8 = b'*';
+    pub const PERIOD: u8 = b'.';
+    pub const COMMA: u8 = b',';
+    pub const DASH: u8 = b'_';
+    pub const MINUS: u8 = b'-';
+    pub const PLUS: u8 = b'+';
 }
 
 pub fn enable_logging() {

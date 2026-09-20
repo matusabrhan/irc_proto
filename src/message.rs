@@ -429,41 +429,46 @@ impl<'a> MessageBuilder<'a> {
         let mut buffer: Vec<u8> = Vec::with_capacity(1024);
 
         if !self.tags.is_empty() {
-            buffer.push(AT as u8);
+            buffer.push(AT);
         }
-        for tag in self.tags {
+        let num_tags = self.tags.len();
+        for (idx, tag) in self.tags.iter().enumerate() {
             buffer.extend_from_slice(tag.key.as_bytes());
             if let Some(value) = tag.value.as_ref() {
+                buffer.push(EQUALS);
                 buffer.extend_from_slice(value.as_bytes());
+            }
+            if idx + 1 < num_tags {
+                buffer.push(SEMICOLON);
             }
         }
 
         if let Some(source) = self.source {
-            buffer.push(COLON as u8);
+            buffer.push(COLON);
             buffer.extend_from_slice(source.name.as_bytes());
             if let Some(user) = &source.user {
-                buffer.push(BANG as u8);
+                buffer.push(BANG);
                 buffer.extend_from_slice(user.as_bytes());
             }
             if let Some(host) = source.host {
-                buffer.push(AT as u8);
+                buffer.push(AT);
                 buffer.extend_from_slice(host.as_bytes());
             }
-            buffer.push(SPACE as u8);
+            buffer.push(SPACE);
         }
 
         buffer.extend_from_slice(self.command.command().as_bytes());
 
         for param in self.command.params() {
-            buffer.push(SPACE as u8);
+            buffer.push(SPACE);
             if param.contains(" ") {
-                buffer.push(COLON as u8);
+                buffer.push(COLON);
             }
             buffer.extend_from_slice(param.as_bytes());
         }
 
-        buffer.push(CR as u8);
-        buffer.push(LF as u8);
+        buffer.push(CR);
+        buffer.push(LF);
 
         Message::new(&buffer).ok()
     }
