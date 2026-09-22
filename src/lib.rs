@@ -1,4 +1,4 @@
-use crate::parser::Parser;
+use crate::parser::{Parser, ParserError};
 
 pub mod ast;
 pub mod connection;
@@ -15,9 +15,9 @@ compile_error!("enable either `std-stream` or `tokio-stream`");
 
 #[derive(Debug)]
 pub enum IrcError {
-    ParseError { message_end: usize },
-    MissingEndOfMessage,
+    ParseError(ParserError),
     ConnectionError,
+    NonUtf8Input,
 }
 
 pub mod strings {
@@ -49,16 +49,18 @@ pub mod strings {
     pub const EQUALS: u8 = b'=';
     pub const GREATER: u8 = b'>';
     pub const BANG: u8 = b'!';
+    pub const QUESTION_MARK: u8 = b'!';
     pub const SINGLE_QUOTE: u8 = b'\'';
     pub const DOUBLE_QUOTE: u8 = b'"';
     pub const SLASH: u8 = b'/';
     pub const HASH: u8 = b'#';
-    pub const STAR: u8 = b'*';
+    pub const ASTERISK: u8 = b'*';
     pub const PERIOD: u8 = b'.';
     pub const COMMA: u8 = b',';
     pub const DASH: u8 = b'_';
     pub const MINUS: u8 = b'-';
     pub const PLUS: u8 = b'+';
+    pub const DOLLAR_SIGN: u8 = b'+';
 }
 
 pub fn enable_logging() {

@@ -6,7 +6,7 @@ pub(crate) struct Token {
 }
 
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
-pub(crate) enum TokenKind {
+pub enum TokenKind {
     Text,
     Space,
     At,
@@ -16,16 +16,18 @@ pub(crate) enum TokenKind {
     Equals,
     Greater,
     Bang,
+    QuestionMark,
     Hash,
     SingleQuote,
     DoubleQuote,
     Slash,
-    Star,
+    Asterisk,
     Period,
     Comma,
     Dash,
     Minus,
     Plus,
+    DollarSign,
     EndOfMessage,
     #[default]
     Invalid,

@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::message::Message;
+use crate::parser::ParserErrorKind;
 use crate::IrcError;
 
 const MAX_MESSAGE_SIZE: usize = 512;
@@ -46,11 +47,15 @@ impl Connection {
                 self.cursor += message.contents().len();
                 Ok(message)
             }
-            Err(IrcError::ParseError { message_end }) => {
-                self.cursor += message_end;
-                Err(IrcError::ParseError { message_end })
+            Err(IrcError::ParseError(err)) => {
+                self.cursor += err.offset;
+                Err(IrcError::ParseError(err))
             }
-            Err(_) => unreachable!(),
+            Err(IrcError::NonUtf8Input) => {
+                self.cursor = self.length;
+                return Err(IrcError::NonUtf8Input);
+            }
+            Err(IrcError::ConnectionError) => unreachable!(),
         }
     }
 
@@ -99,31 +104,37 @@ impl Connection {
                     self.cursor += message.contents().len();
                     return Ok(message);
                 }
-                Err(IrcError::ParseError { message_end }) => {
-                    self.cursor += message_end;
-                    return Err(IrcError::ParseError { message_end });
-                }
-                Err(IrcError::MissingEndOfMessage) => {
-                    if self.cursor > 0 {
-                        self.buffer.copy_within(self.cursor..self.length, 0);
-                        self.length -= self.cursor;
-                        self.cursor = 0
-                    }
-                    if self.length >= MAX_MESSAGE_SIZE {
-                        self.cursor = self.length;
-                        return Err(IrcError::MissingEndOfMessage);
-                    }
-                    self.length += match self
-                        .stream
-                        .read(&mut self.buffer[self.length..])
-                        .await
-                        .map_err(|_| IrcError::ConnectionError)?
-                    {
-                        0 => return Err(IrcError::ConnectionError),
-                        n => n,
-                    };
-                }
                 Err(IrcError::ConnectionError) => unreachable!(),
+                Err(IrcError::NonUtf8Input) => {
+                    self.cursor = self.length;
+                    return Err(IrcError::NonUtf8Input);
+                }
+                Err(IrcError::ParseError(err)) => match err.kind {
+                    ParserErrorKind::MissingEndOfMessage => {
+                        if self.cursor > 0 {
+                            self.buffer.copy_within(self.cursor..self.length, 0);
+                            self.length -= self.cursor;
+                            self.cursor = 0
+                        }
+                        if self.length >= MAX_MESSAGE_SIZE {
+                            self.cursor = self.length;
+                            return Err(IrcError::ParseError(err));
+                        }
+                        self.length += match self
+                            .stream
+                            .read(&mut self.buffer[self.length..])
+                            .await
+                            .map_err(|_| IrcError::ConnectionError)?
+                        {
+                            0 => return Err(IrcError::ConnectionError),
+                            n => n,
+                        };
+                    }
+                    _ => {
+                        self.cursor += err.offset;
+                        return Err(IrcError::ParseError(err));
+                    }
+                },
             };
         }
     }

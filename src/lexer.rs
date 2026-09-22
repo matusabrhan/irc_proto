@@ -1,7 +1,7 @@
 use std::slice::Iter;
 
 use crate::{
-    strings::*,
+    strings,
     token::{Token, TokenKind},
 };
 
@@ -43,48 +43,31 @@ impl<'a> Lexer<'a> {
 
     pub(crate) fn next_token(&mut self) -> Token {
         let token = match *self.current {
-            SPACE => Token::new(TokenKind::Space, self.cursor, 1),
-
-            AT => Token::new(TokenKind::At, self.cursor, 1),
-
-            COLON => Token::new(TokenKind::Colon, self.cursor, 1),
-
-            SEMICOLON => Token::new(TokenKind::Semicolon, self.cursor, 1),
-
-            LESSER => Token::new(TokenKind::Lesser, self.cursor, 1),
-
-            EQUALS => Token::new(TokenKind::Equals, self.cursor, 1),
-
-            GREATER => Token::new(TokenKind::Greater, self.cursor, 1),
-
-            BANG => Token::new(TokenKind::Bang, self.cursor, 1),
-
-            HASH => Token::new(TokenKind::Hash, self.cursor, 1),
-
-            SINGLE_QUOTE => Token::new(TokenKind::SingleQuote, self.cursor, 1),
-
-            DOUBLE_QUOTE => Token::new(TokenKind::DoubleQuote, self.cursor, 1),
-
-            SLASH => Token::new(TokenKind::Slash, self.cursor, 1),
-
-            STAR => Token::new(TokenKind::Star, self.cursor, 1),
-
-            PERIOD => Token::new(TokenKind::Period, self.cursor, 1),
-
-            COMMA => Token::new(TokenKind::Comma, self.cursor, 1),
-
-            DASH => Token::new(TokenKind::Dash, self.cursor, 1),
-
-            MINUS => Token::new(TokenKind::Minus, self.cursor, 1),
-
-            PLUS => Token::new(TokenKind::Plus, self.cursor, 1),
-
-            CR => match self.peek.eq(&LF) {
+            strings::SPACE => Token::new(TokenKind::Space, self.cursor, 1),
+            strings::AT => Token::new(TokenKind::At, self.cursor, 1),
+            strings::COLON => Token::new(TokenKind::Colon, self.cursor, 1),
+            strings::SEMICOLON => Token::new(TokenKind::Semicolon, self.cursor, 1),
+            strings::LESSER => Token::new(TokenKind::Lesser, self.cursor, 1),
+            strings::EQUALS => Token::new(TokenKind::Equals, self.cursor, 1),
+            strings::GREATER => Token::new(TokenKind::Greater, self.cursor, 1),
+            strings::BANG => Token::new(TokenKind::Bang, self.cursor, 1),
+            strings::QUESTION_MARK => Token::new(TokenKind::QuestionMark, self.cursor, 1),
+            strings::HASH => Token::new(TokenKind::Hash, self.cursor, 1),
+            strings::SINGLE_QUOTE => Token::new(TokenKind::SingleQuote, self.cursor, 1),
+            strings::DOUBLE_QUOTE => Token::new(TokenKind::DoubleQuote, self.cursor, 1),
+            strings::SLASH => Token::new(TokenKind::Slash, self.cursor, 1),
+            strings::ASTERISK => Token::new(TokenKind::Asterisk, self.cursor, 1),
+            strings::PERIOD => Token::new(TokenKind::Period, self.cursor, 1),
+            strings::COMMA => Token::new(TokenKind::Comma, self.cursor, 1),
+            strings::DASH => Token::new(TokenKind::Dash, self.cursor, 1),
+            strings::MINUS => Token::new(TokenKind::Minus, self.cursor, 1),
+            strings::PLUS => Token::new(TokenKind::Plus, self.cursor, 1),
+            strings::DOLLAR_SIGN => Token::new(TokenKind::DollarSign, self.cursor, 1),
+            strings::CR => match self.peek.eq(&strings::LF) {
                 true => return Token::new(TokenKind::EndOfMessage, self.cursor, 2),
                 false => return Token::new(TokenKind::EndOfMessage, self.cursor, 1),
             },
-
-            LF => return Token::new(TokenKind::EndOfMessage, self.cursor, 1),
+            strings::LF => return Token::new(TokenKind::EndOfMessage, self.cursor, 1),
 
             c if c.is_ascii_alphanumeric() => {
                 let start = self.cursor;

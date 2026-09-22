@@ -3,8 +3,7 @@ use std::ops::Index;
 use crate::{
     ast::{Node, NodeId, NodeKind},
     parser::Parser,
-    strings::*,
-    IrcError,
+    strings, IrcError,
 };
 
 #[derive(Debug, Clone)]
@@ -115,25 +114,25 @@ pub enum Command<'a> {
 impl<'a> Command<'a> {
     pub fn command(&self) -> &str {
         match self {
-            Self::PING { .. } => PING,
-            Self::PONG { .. } => PONG,
+            Self::PING { .. } => strings::PING,
+            Self::PONG { .. } => strings::PONG,
 
-            Self::CAP { .. } => CAP,
-            Self::PASS { .. } => PASS,
-            Self::NICK { .. } => NICK,
-            Self::USER { .. } => USER,
-            Self::QUIT { .. } => QUIT,
+            Self::CAP { .. } => strings::CAP,
+            Self::PASS { .. } => strings::PASS,
+            Self::NICK { .. } => strings::NICK,
+            Self::USER { .. } => strings::USER,
+            Self::QUIT { .. } => strings::QUIT,
 
-            Self::JOIN { .. } => JOIN,
-            Self::PRIVMSG { .. } => PRIVMSG,
+            Self::JOIN { .. } => strings::JOIN,
+            Self::PRIVMSG { .. } => strings::PRIVMSG,
 
-            Self::RPLWELCOME { .. } => RPL_WELCOME,
-            Self::RPLYOURHOST { .. } => RPL_YOURHOST,
-            Self::RPLCREATED { .. } => RPL_CREATED,
-            Self::RPLMYINFO { .. } => RPL_MYINFO,
+            Self::RPLWELCOME { .. } => strings::RPL_WELCOME,
+            Self::RPLYOURHOST { .. } => strings::RPL_YOURHOST,
+            Self::RPLCREATED { .. } => strings::RPL_CREATED,
+            Self::RPLMYINFO { .. } => strings::RPL_MYINFO,
 
-            Self::ERRPASSWDMISMATCH { .. } => ERR_PASSWDMISMATCH,
-            Self::ERRNICKNAMEINUSE { .. } => ERR_NICKNAMEINUSE,
+            Self::ERRPASSWDMISMATCH { .. } => strings::ERR_PASSWDMISMATCH,
+            Self::ERRNICKNAMEINUSE { .. } => strings::ERR_NICKNAMEINUSE,
         }
     }
 
@@ -225,20 +224,14 @@ pub struct MessageBuilder<'a> {
 impl Message {
     pub fn new(input: &[u8]) -> Result<Self, IrcError> {
         let text = String::from_utf8(input.to_vec())
-            .map_err(|_| IrcError::ParseError {
-                message_end: input.len(),
-            })?
+            .map_err(|_| IrcError::NonUtf8Input)?
             .into_boxed_str();
 
         let mut parser = Parser::new(text.as_ref());
         let root = match parser.parse_message() {
             Ok(root) => root,
-            Err(()) => {
-                let error = match parser.end_of_message() {
-                    Some(n) => IrcError::ParseError { message_end: n },
-                    None => IrcError::MissingEndOfMessage,
-                };
-                return Err(error);
+            Err(err) => {
+                return Err(IrcError::ParseError(err));
             }
         };
         let nodes = Nodes(parser.get_nodes());
@@ -259,9 +252,7 @@ impl Message {
                     nodes,
                 })
             }
-            _ => Err(IrcError::ParseError {
-                message_end: text.len(),
-            }),
+            _ => unreachable!(),
         }
     }
 
@@ -324,16 +315,10 @@ impl Message {
                 let reason = reason.as_ref().map(|reason| self.get_value(reason.clone()));
                 Command::QUIT { reason }
             }
-            NodeKind::CommandJoin { channels, keys } => {
-                // let keys = match keys {
-                //     Some(keys) => Some(self.get_value(keys.clone())),
-                //     None => None,
-                // };
-                Command::JOIN {
-                    channels: self.get_value(channels.clone()),
-                    keys: keys.as_ref().map(|keys| self.get_value(keys.clone())),
-                }
-            }
+            NodeKind::CommandJoin { channels, keys } => Command::JOIN {
+                channels: self.get_value(channels.clone()),
+                keys: keys.as_ref().map(|keys| self.get_value(keys.clone())),
+            },
             NodeKind::CommandPrivMsg { targets, text } => Command::PRIVMSG {
                 targets: self.get_value(targets.clone()),
                 text: self.get_value(text.clone()),
@@ -447,46 +432,46 @@ impl<'a> MessageBuilder<'a> {
         let mut buffer: Vec<u8> = Vec::with_capacity(1024);
 
         if !self.tags.is_empty() {
-            buffer.push(AT);
+            buffer.push(strings::AT);
         }
         let num_tags = self.tags.len();
         for (idx, tag) in self.tags.iter().enumerate() {
             buffer.extend_from_slice(tag.key.as_bytes());
             if let Some(value) = tag.value.as_ref() {
-                buffer.push(EQUALS);
+                buffer.push(strings::EQUALS);
                 buffer.extend_from_slice(value.as_bytes());
             }
             if idx + 1 < num_tags {
-                buffer.push(SEMICOLON);
+                buffer.push(strings::SEMICOLON);
             }
         }
 
         if let Some(source) = self.source {
-            buffer.push(COLON);
+            buffer.push(strings::COLON);
             buffer.extend_from_slice(source.name.as_bytes());
             if let Some(user) = &source.user {
-                buffer.push(BANG);
+                buffer.push(strings::BANG);
                 buffer.extend_from_slice(user.as_bytes());
             }
             if let Some(host) = source.host {
-                buffer.push(AT);
+                buffer.push(strings::AT);
                 buffer.extend_from_slice(host.as_bytes());
             }
-            buffer.push(SPACE);
+            buffer.push(strings::SPACE);
         }
 
         buffer.extend_from_slice(self.command.command().as_bytes());
 
         for param in self.command.params() {
-            buffer.push(SPACE);
+            buffer.push(strings::SPACE);
             if param.contains(" ") {
-                buffer.push(COLON);
+                buffer.push(strings::COLON);
             }
             buffer.extend_from_slice(param.as_bytes());
         }
 
-        buffer.push(CR);
-        buffer.push(LF);
+        buffer.push(strings::CR);
+        buffer.push(strings::LF);
 
         Message::new(&buffer).ok()
     }
