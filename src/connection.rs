@@ -1,12 +1,14 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, time::Duration};
+
 #[cfg(feature = "std-stream")]
 use std::io::{Read, Write};
-use std::time::Duration;
 
 #[cfg(feature = "tokio-stream")]
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{broadcast, mpsc};
-use tokio::task::JoinHandle;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::{broadcast, mpsc},
+    task::JoinHandle,
+};
 
 use crate::message::Message;
 use crate::parser::ParserErrorKind;
@@ -54,10 +56,6 @@ impl Connection {
             Err(IrcError::ParseError(err)) => {
                 self.cursor += err.offset;
                 Err(IrcError::ParseError(err))
-            }
-            Err(IrcError::NonUtf8Input) => {
-                self.cursor = self.length;
-                return Err(IrcError::NonUtf8Input);
             }
             Err(IrcError::ConnectionError) => unreachable!(),
         }
@@ -158,6 +156,7 @@ impl Connection {
     }
 }
 
+#[cfg(feature = "tokio-stream")]
 pub struct Transport {
     handle: JoinHandle<()>,
     tx: mpsc::Sender<Message>,
@@ -165,6 +164,7 @@ pub struct Transport {
     cancel: broadcast::Sender<()>,
 }
 
+#[cfg(feature = "tokio-stream")]
 impl Transport {
     pub fn start(stream: tokio::net::TcpStream, channel_size: usize) -> Self {
         let (cancel_tx, mut cancel_rx) = broadcast::channel(1);
@@ -178,8 +178,8 @@ impl Transport {
                     msg = conn.read() => {
                         match msg {
                             Ok(msg) => if client_tx.send(msg).await.is_err() { break }
-                            Err(IrcError::ConnectionError) => {},
-                            Err(IrcError::ParseError { .. }) => {},
+                            Err(IrcError::ConnectionError) => { break },
+                            Err(IrcError::ParseError { .. }) => continue,
                         }
                     }
 
