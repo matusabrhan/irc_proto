@@ -1,5 +1,3 @@
-use std::{cell::RefCell, time::Duration};
-
 #[cfg(feature = "std-stream")]
 use std::io::{Read, Write};
 
@@ -18,7 +16,7 @@ const MAX_MESSAGE_SIZE: usize = 512;
 const BUFFER_SIZE: usize = 1024 * 2;
 
 #[derive(Debug)]
-pub struct Connection {
+struct Transport {
     #[cfg(feature = "std-stream")]
     stream: std::net::TcpStream,
     #[cfg(feature = "tokio-stream")]
@@ -29,7 +27,7 @@ pub struct Connection {
 }
 
 #[cfg(feature = "std-stream")]
-impl Connection {
+impl Transport {
     pub fn new(stream: std::net::TcpStream) -> Self {
         Self {
             stream,
@@ -76,7 +74,7 @@ impl Connection {
 }
 
 #[cfg(feature = "tokio-stream")]
-impl Connection {
+impl Transport {
     pub fn new(stream: tokio::net::TcpStream) -> Self {
         Self {
             stream,
@@ -92,9 +90,9 @@ impl Connection {
                 .stream
                 .read(&mut self.buffer)
                 .await
-                .map_err(|_| IrcError::ConnectionError)?
+                .map_err(|err| IrcError::ConnectionError(err))?
             {
-                0 => return Err(IrcError::ConnectionError),
+                0 => return Err(IrcError::EOF),
                 n => n,
             };
             self.cursor = 0;
@@ -106,8 +104,7 @@ impl Connection {
                     self.cursor += message.contents().len();
                     return Ok(message);
                 }
-                Err(IrcError::ConnectionError) => unreachable!(),
-                Err(IrcError::ParseError(err)) => match err.kind {
+                Err(err) => match err.kind {
                     ParserErrorKind::MissingEndOfMessage => {
                         if self.cursor > 0 {
                             self.buffer.copy_within(self.cursor..self.length, 0);
@@ -122,9 +119,9 @@ impl Connection {
                             .stream
                             .read(&mut self.buffer[self.length..])
                             .await
-                            .map_err(|_| IrcError::ConnectionError)?
+                            .map_err(|err| IrcError::ConnectionError(err))?
                         {
-                            0 => return Err(IrcError::ConnectionError),
+                            0 => return Err(IrcError::EOF),
                             n => n,
                         };
                     }
@@ -141,7 +138,7 @@ impl Connection {
         self.stream
             .write_all(msg.contents().as_bytes())
             .await
-            .map_err(|_| IrcError::ConnectionError)?;
+            .map_err(|err| IrcError::ConnectionError(err))?;
 
         Ok(())
     }
@@ -150,74 +147,83 @@ impl Connection {
         self.stream
             .shutdown()
             .await
-            .map_err(|_| ())
-            .map_err(|_| IrcError::ConnectionError)?;
+            .map_err(|err| IrcError::ConnectionError(err))?;
         Ok(())
     }
 }
 
+pub enum IrcEvent {
+    Message(Message),
+    Error(IrcError),
+    Closed,
+}
+
 #[cfg(feature = "tokio-stream")]
-pub struct Transport {
+pub struct Connection {
     handle: JoinHandle<()>,
     tx: mpsc::Sender<Message>,
-    rx: RefCell<mpsc::Receiver<Message>>,
+    rx: mpsc::Receiver<IrcEvent>,
     cancel: broadcast::Sender<()>,
 }
 
 #[cfg(feature = "tokio-stream")]
-impl Transport {
+impl Connection {
     pub fn start(stream: tokio::net::TcpStream, channel_size: usize) -> Self {
         let (cancel_tx, mut cancel_rx) = broadcast::channel(1);
-        let (server_tx, mut client_rx) = mpsc::channel::<Message>(channel_size);
-        let (client_tx, server_rx) = mpsc::channel::<Message>(channel_size);
+        let (source_tx, mut sink_rx) = mpsc::channel::<Message>(channel_size);
+        let (sink_tx, source_rx) = mpsc::channel::<IrcEvent>(channel_size);
 
-        let mut conn = Connection::new(stream);
+        let mut conn = Transport::new(stream);
         let handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
                     msg = conn.read() => {
                         match msg {
-                            Ok(msg) => if client_tx.send(msg).await.is_err() { break }
-                            Err(IrcError::ConnectionError) => { break },
-                            Err(IrcError::ParseError { .. }) => continue,
+                            Ok(msg) => {
+                                sink_tx.send(IrcEvent::Message(msg)).await;
+                            }
+                            Err(err) => {
+                                sink_tx.send(IrcEvent::Error(err)).await;
+                            },
                         }
                     }
 
-                    msg = client_rx.recv() => {
+                    msg = sink_rx.recv() => {
                         match msg {
-                            Some(msg) => if conn.write(msg).await.is_err() { break }
-                            None => break,
+                            Some(msg) => {
+                                conn.write(msg).await;
+                            }
+                            None => {
+                                sink_tx.send(IrcEvent::Closed).await;
+                            },
                         }
                     }
                     _ = cancel_rx.recv() => break,
                 }
             }
-            client_rx.close();
+            sink_rx.close();
+            conn.close().await;
         });
 
         Self {
             handle,
-            tx: server_tx,
-            rx: RefCell::new(server_rx),
+            tx: source_tx,
+            rx: source_rx,
             cancel: cancel_tx,
         }
     }
 
-    pub async fn recv(&self) -> Option<Message> {
-        self.rx.borrow_mut().recv().await
+    pub async fn recv(&mut self) -> Option<IrcEvent> {
+        self.rx.recv().await
     }
 
     pub async fn send(&self, msg: Message) -> Result<(), ()> {
         self.tx.send(msg).await.map_err(|_| ())
     }
 
-    pub async fn stop(&self) {
-        while self.cancel.send(()).is_ok() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        if !self.handle.is_finished() {
-            self.handle.abort();
-        }
+    pub async fn stop(self) -> Result<(), tokio::task::JoinError> {
+        self.cancel.send(()).ok();
+        self.handle.await
     }
 }
 
@@ -230,7 +236,7 @@ mod tests {
     };
 
     use crate::{
-        connection::Connection,
+        connection::Transport,
         message::{Command, MessageBuilder},
     };
 
@@ -241,11 +247,11 @@ mod tests {
     }
 
     #[test]
-    fn test_connection_write1() {
+    fn test_transport_write1() {
         let (listener, _) = start_listen();
         let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (mut server, _) = listener.accept().unwrap();
-        let mut client = Connection::new(stream);
+        let mut client = Transport::new(stream);
 
         let message = MessageBuilder::with_command(Command::PRIVMSG {
             targets: "#chan",
@@ -267,7 +273,7 @@ mod tests {
         let (listener, _) = start_listen();
         let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (mut server, _) = listener.accept().unwrap();
-        let mut client = Connection::new(stream);
+        let mut client = Transport::new(stream);
 
         let message1 = MessageBuilder::with_command(Command::PASS {
             password: "password",
@@ -304,9 +310,9 @@ mod tests {
 #[cfg(feature = "tokio-stream")]
 #[cfg(test)]
 mod tests {
-    use super::Connection;
+    use super::Transport;
     use crate::{
-        connection::Transport,
+        connection::{Connection, IrcEvent},
         message::{Command, MessageBuilder},
     };
     use log::info;
@@ -325,13 +331,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connection_write1() {
+    async fn test_transport_write1() {
         let (listener, _) = start_listen().await;
         let stream = TcpStream::connect(listener.local_addr().unwrap())
             .await
             .unwrap();
         let (mut server, _) = listener.accept().await.unwrap();
-        let mut client = Connection::new(stream);
+        let mut client = Transport::new(stream);
 
         let message = MessageBuilder::with_command(Command::PRIVMSG {
             targets: "#chan",
@@ -350,13 +356,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connection_write2() {
+    async fn test_transport_write2() {
         let (listener, _) = start_listen().await;
         let stream = TcpStream::connect(listener.local_addr().unwrap())
             .await
             .unwrap();
         let (mut server, _) = listener.accept().await.unwrap();
-        let mut client = Connection::new(stream);
+        let mut client = Transport::new(stream);
         let message = MessageBuilder::with_command(Command::PRIVMSG {
             targets: "#chan",
             text: "Hello",
@@ -375,13 +381,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connection_read1() {
+    async fn test_transport_read1() {
         let (listener, _) = start_listen().await;
         let stream = TcpStream::connect(listener.local_addr().unwrap())
             .await
             .unwrap();
         let (mut server, _) = listener.accept().await.unwrap();
-        let mut client = Connection::new(stream);
+        let mut client = Transport::new(stream);
 
         server.write_all(b"PRIVMSG #chan Hello\r\n").await.unwrap();
 
@@ -394,13 +400,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connection_read2() {
+    async fn test_transport_read2() {
         let (listener, _) = start_listen().await;
         let stream = TcpStream::connect(listener.local_addr().unwrap())
             .await
             .unwrap();
         let (mut server, _) = listener.accept().await.unwrap();
-        let mut client = Connection::new(stream);
+        let mut client = Transport::new(stream);
 
         server.write_all(b"PRIVMSG #chan Hello\r\n").await.unwrap();
         server.write_all(b"PRIVMSG #chan Hello\r\n").await.unwrap();
@@ -415,13 +421,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connection_read3() {
+    async fn test_transport_read3() {
         let (listener, _) = start_listen().await;
         let stream = TcpStream::connect(listener.local_addr().unwrap())
             .await
             .unwrap();
         let (mut server, _) = listener.accept().await.unwrap();
-        let mut client = Connection::new(stream);
+        let mut client = Transport::new(stream);
 
         server.write_all(b"PRIVMSG ").await.unwrap();
         tokio::spawn(async move {
@@ -440,16 +446,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_transport() {
+    async fn test_connection() {
         let (listener, _) = start_listen().await;
-        let client = Transport::start(
+        let client = Connection::start(
             TcpStream::connect(listener.local_addr().unwrap())
                 .await
                 .unwrap(),
             10,
         );
         let (stream, _) = listener.accept().await.unwrap();
-        let server = Transport::start(stream, 10);
+        let mut server = Connection::start(stream, 10);
 
         let message_in = MessageBuilder::with_command(Command::PRIVMSG {
             targets: "foo",
@@ -459,8 +465,9 @@ mod tests {
         .unwrap();
         client.send(message_in.clone()).await.unwrap();
 
-        let message_out = server.recv().await.unwrap();
-
-        assert_eq!(message_in.contents(), message_out.contents())
+        match server.recv().await.unwrap() {
+            IrcEvent::Message(msg) => assert_eq!(message_in.contents(), msg.contents()),
+            _ => assert!(false),
+        }
     }
 }

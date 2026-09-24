@@ -52,19 +52,10 @@ impl<'a> Iterator for Lexer<'a> {
             strings::SEMICOLON => Token::new(TokenKind::Semicolon, self.cursor, 1),
             strings::LESSER => Token::new(TokenKind::Lesser, self.cursor, 1),
             strings::EQUALS => Token::new(TokenKind::Equals, self.cursor, 1),
-            strings::GREATER => Token::new(TokenKind::Greater, self.cursor, 1),
             strings::BANG => Token::new(TokenKind::Bang, self.cursor, 1),
             strings::QUESTION_MARK => Token::new(TokenKind::QuestionMark, self.cursor, 1),
-            strings::HASH => Token::new(TokenKind::Hash, self.cursor, 1),
-            strings::SINGLE_QUOTE => Token::new(TokenKind::SingleQuote, self.cursor, 1),
-            strings::DOUBLE_QUOTE => Token::new(TokenKind::DoubleQuote, self.cursor, 1),
-            strings::SLASH => Token::new(TokenKind::Slash, self.cursor, 1),
             strings::ASTERISK => Token::new(TokenKind::Asterisk, self.cursor, 1),
-            strings::PERIOD => Token::new(TokenKind::Period, self.cursor, 1),
             strings::COMMA => Token::new(TokenKind::Comma, self.cursor, 1),
-            strings::DASH => Token::new(TokenKind::Dash, self.cursor, 1),
-            strings::MINUS => Token::new(TokenKind::Minus, self.cursor, 1),
-            strings::PLUS => Token::new(TokenKind::Plus, self.cursor, 1),
             strings::DOLLAR_SIGN => Token::new(TokenKind::DollarSign, self.cursor, 1),
             strings::CR => {
                 self.current = &strings::NULL;
@@ -87,9 +78,9 @@ impl<'a> Iterator for Lexer<'a> {
                 Token::new(TokenKind::Text, start, stop - start)
             }
 
-            _ => {
-                return None;
-            }
+            c if c.is_ascii_graphic() => Token::new(TokenKind::Graphic, self.cursor, 1),
+
+            _ => return None,
         };
         self.read_char();
 
@@ -142,17 +133,14 @@ mod tests {
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 26, 1));
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 27, 7));
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 34, 1));
-        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Hash, 35, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Graphic, 35, 1));
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 36, 4));
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 40, 1));
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Colon, 41, 1));
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 42, 3));
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 45, 1));
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 46, 4));
-        assert_eq!(
-            lexer.next().unwrap(),
-            Token::new(TokenKind::SingleQuote, 50, 1)
-        );
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Graphic, 50, 1));
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 51, 1));
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 52, 1));
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 53, 2));
@@ -169,6 +157,8 @@ mod tests {
         let mut lexer = Lexer::new(input);
 
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 0, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Graphic, 1, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 2, 1));
         assert_eq!(lexer.next(), None);
     }
 

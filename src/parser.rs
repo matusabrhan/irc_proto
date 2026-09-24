@@ -9,7 +9,6 @@ pub struct Parser<'a> {
     input: &'a [u8],
     lexer: Lexer<'a>,
     current: Token,
-    peek: Token,
     nodes: Vec<Node>,
 }
 
@@ -23,7 +22,7 @@ pub enum ParserErrorKind {
     UnknownCommand,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct ParserError {
     pub offset: usize,
     pub kind: ParserErrorKind,
@@ -33,8 +32,7 @@ impl<'a> Iterator for Parser<'a> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let last: Token = std::mem::take(&mut self.current);
-        self.current = std::mem::replace(&mut self.peek, self.lexer.next().unwrap_or_default());
+        let last = std::mem::replace(&mut self.current, self.lexer.next().unwrap_or_default());
         if self.current.kind() == TokenKind::Null {
             return None;
         }
@@ -48,7 +46,6 @@ impl<'a> Parser<'a> {
         Self {
             input,
             current: lexer.next().unwrap_or_default(),
-            peek: lexer.next().unwrap_or_default(),
             lexer,
             nodes: Vec::with_capacity(16),
         }
@@ -524,7 +521,7 @@ mod tests {
     fn test_parser_tags1() {
         let input = "@id=234AB;foo ".as_bytes();
         let mut parser = Parser::new(input);
-        assert_eq!(Ok(NodeId(5)), parser.parse_tags());
+        assert_eq!(NodeId(5), parser.parse_tags().unwrap());
         let expected = vec![
             Node::new(NodeKind::TagKey, 1, 2),
             Node::new(NodeKind::TagValue, 4, 5),
@@ -558,7 +555,7 @@ mod tests {
     fn test_parse_source1() {
         let input = ":dan!d@localhost ".as_bytes();
         let mut parser = Parser::new(input);
-        assert_eq!(Ok(NodeId(3)), parser.parse_source());
+        assert_eq!(NodeId(3), parser.parse_source().unwrap());
         let expected = vec![
             Node::new(NodeKind::SourceName, 1, 3),
             Node::new(NodeKind::SourceUser, 5, 1),
@@ -584,7 +581,7 @@ mod tests {
     fn test_parse_command1() {
         let input = "PRIVMSG #chan :Hey what's up!\r\n".as_bytes();
         let mut parser = Parser::new(input);
-        assert_eq!(Ok(NodeId(2)), parser.parse_command());
+        assert_eq!(NodeId(2), parser.parse_command().unwrap());
         let expected = vec![
             Node::new(NodeKind::Parameter, 8, 5),
             Node::new(NodeKind::Parameter, 15, 14),
@@ -608,7 +605,7 @@ mod tests {
     fn test_parse_message1() {
         let input = "@id=234AB;foo :dan!d@localhost PRIVMSG #chan :Hey what's up!\r\n".as_bytes();
         let mut parser = Parser::new(input);
-        assert_eq!(Ok(NodeId(13)), parser.parse_message());
+        assert_eq!(NodeId(13), parser.parse_message().unwrap());
         let expected = vec![
             Node::new(NodeKind::TagKey, 1, 2),
             Node::new(NodeKind::TagValue, 4, 5),

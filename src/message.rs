@@ -2,8 +2,8 @@ use std::ops::Index;
 
 use crate::{
     ast::{Node, NodeId, NodeKind},
-    parser::Parser,
-    strings, IrcError,
+    parser::{Parser, ParserError},
+    strings,
 };
 
 #[derive(Debug, Clone)]
@@ -226,13 +226,11 @@ pub struct MessageBuilder<'a> {
 }
 
 impl Message {
-    pub fn new(input: &[u8]) -> Result<Self, IrcError> {
+    pub fn new(input: &[u8]) -> Result<Self, ParserError> {
         let mut parser = Parser::new(input);
         let root_id = match parser.parse_message() {
             Ok(root) => root,
-            Err(err) => {
-                return Err(IrcError::ParseError(err));
-            }
+            Err(err) => return Err(err),
         };
         let nodes = Nodes(parser.get_nodes());
         let root_node = nodes.index(root_id);
