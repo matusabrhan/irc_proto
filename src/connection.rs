@@ -1,8 +1,12 @@
+use std::cell::RefCell;
 #[cfg(feature = "std-stream")]
 use std::io::{Read, Write};
+use std::time::Duration;
 
 #[cfg(feature = "tokio-stream")]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::{broadcast, mpsc};
+use tokio::task::JoinHandle;
 
 use crate::message::Message;
 use crate::parser::ParserErrorKind;
@@ -154,6 +158,69 @@ impl Connection {
     }
 }
 
+pub struct Transport {
+    handle: JoinHandle<()>,
+    tx: mpsc::Sender<Message>,
+    rx: RefCell<mpsc::Receiver<Message>>,
+    cancel: broadcast::Sender<()>,
+}
+
+impl Transport {
+    pub fn start(stream: tokio::net::TcpStream, channel_size: usize) -> Self {
+        let (cancel_tx, mut cancel_rx) = broadcast::channel(1);
+        let (server_tx, mut client_rx) = mpsc::channel::<Message>(channel_size);
+        let (client_tx, server_rx) = mpsc::channel::<Message>(channel_size);
+
+        let mut conn = Connection::new(stream);
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    msg = conn.read() => {
+                        match msg {
+                            Ok(msg) => if client_tx.send(msg).await.is_err() { break }
+                            Err(IrcError::ConnectionError) => {},
+                            Err(IrcError::ParseError { .. }) => {},
+                        }
+                    }
+
+                    msg = client_rx.recv() => {
+                        match msg {
+                            Some(msg) => if conn.write(msg).await.is_err() { break }
+                            None => break,
+                        }
+                    }
+                    _ = cancel_rx.recv() => break,
+                }
+            }
+            client_rx.close();
+        });
+
+        Self {
+            handle,
+            tx: server_tx,
+            rx: RefCell::new(server_rx),
+            cancel: cancel_tx,
+        }
+    }
+
+    pub async fn recv(&self) -> Option<Message> {
+        self.rx.borrow_mut().recv().await
+    }
+
+    pub async fn send(&self, msg: Message) -> Result<(), ()> {
+        self.tx.send(msg).await.map_err(|_| ())
+    }
+
+    pub async fn stop(&self) {
+        while self.cancel.send(()).is_ok() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if !self.handle.is_finished() {
+            self.handle.abort();
+        }
+    }
+}
+
 #[cfg(feature = "std-stream")]
 #[cfg(test)]
 mod tests {
@@ -238,7 +305,10 @@ mod tests {
 #[cfg(test)]
 mod tests {
     use super::Connection;
-    use crate::message::{Command, MessageBuilder};
+    use crate::{
+        connection::Transport,
+        message::{Command, MessageBuilder},
+    };
     use log::info;
     use std::{net::SocketAddr, time::Duration};
     use tokio::{
@@ -270,7 +340,7 @@ mod tests {
         .build()
         .unwrap();
         client.write(message).await.unwrap();
-        client.close().await;
+        client.close().await.unwrap();
 
         let mut res = String::new();
         server.read_to_string(&mut res).await.unwrap();
@@ -295,7 +365,7 @@ mod tests {
         .unwrap();
         client.write(message.clone()).await.unwrap();
         client.write(message).await.unwrap();
-        client.close().await;
+        client.close().await.unwrap();
 
         let mut res = String::new();
         server.read_to_string(&mut res).await.unwrap();
@@ -319,7 +389,7 @@ mod tests {
             "PRIVMSG #chan Hello\r\n",
             client.read().await.unwrap().contents(),
         );
-        client.close().await;
+        client.close().await.unwrap();
         server.shutdown().await.unwrap();
     }
 
@@ -340,7 +410,7 @@ mod tests {
         msg.push_str(client.read().await.unwrap().contents());
 
         assert_eq!("PRIVMSG #chan Hello\r\nPRIVMSG #chan Hello\r\n", msg);
-        client.close().await;
+        client.close().await.unwrap();
         server.shutdown().await.unwrap();
     }
 
@@ -366,6 +436,31 @@ mod tests {
             "PRIVMSG #chan Hello\r\n",
             client.read().await.unwrap().contents(),
         );
-        client.close().await;
+        client.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_transport() {
+        let (listener, _) = start_listen().await;
+        let client = Transport::start(
+            TcpStream::connect(listener.local_addr().unwrap())
+                .await
+                .unwrap(),
+            10,
+        );
+        let (stream, _) = listener.accept().await.unwrap();
+        let server = Transport::start(stream, 10);
+
+        let message_in = MessageBuilder::with_command(Command::PRIVMSG {
+            targets: "foo",
+            text: "bar",
+        })
+        .build()
+        .unwrap();
+        client.send(message_in.clone()).await.unwrap();
+
+        let message_out = server.recv().await.unwrap();
+
+        assert_eq!(message_in.contents(), message_out.contents())
     }
 }
