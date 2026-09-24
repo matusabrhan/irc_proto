@@ -14,8 +14,8 @@ pub(crate) struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub(crate) fn new(input: &'a str) -> Self {
-        let mut input = input.as_bytes().iter();
+    pub(crate) fn new(input: &'a [u8]) -> Self {
+        let mut input = input.iter();
         Self {
             cursor: 0,
             read_cursor: 1,
@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn test_lexer1() {
-        let input = "aaaa @:bbbbb ab123cd\rasdfasdf";
+        let input = "aaaa @:bbbbb ab123cd\rasdfasdf".as_bytes();
         let mut lexer = Lexer::new(input);
 
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 0, 4));
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_lexer2() {
-        let input = "@id=234AB :dan!d@localhost PRIVMSG #chan :Hey what's up!\r\n";
+        let input = "@id=234AB :dan!d@localhost PRIVMSG #chan :Hey what's up!\r\n".as_bytes();
         let mut lexer = Lexer::new(input);
 
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::At, 0, 1));
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn test_lexer3() {
-        let input = "a^b";
+        let input = "a^b".as_bytes();
         let mut lexer = Lexer::new(input);
 
         assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 0, 1));
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_lexer4() {
-        let input = "";
+        let input = "".as_bytes();
         let mut lexer = Lexer::new(input);
 
         assert_eq!(lexer.next(), None);

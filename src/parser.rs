@@ -6,7 +6,7 @@ use crate::{
 };
 
 pub struct Parser<'a> {
-    input: &'a str,
+    input: &'a [u8],
     lexer: Lexer<'a>,
     current: Token,
     peek: Token,
@@ -34,11 +34,8 @@ impl<'a> Iterator for Parser<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let last: Token = std::mem::take(&mut self.current);
-        self.current = std::mem::replace(
-            &mut self.peek,
-            self.lexer.next().unwrap_or(Token::default()),
-        );
-        if self.current == Token::default() {
+        self.current = std::mem::replace(&mut self.peek, self.lexer.next().unwrap_or_default());
+        if self.current.kind() == TokenKind::Null {
             return None;
         }
         Some(last)
@@ -46,12 +43,12 @@ impl<'a> Iterator for Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub(crate) fn new(input: &'a str) -> Self {
+    pub(crate) fn new(input: &'a [u8]) -> Self {
         let mut lexer = Lexer::new(input);
         Self {
             input,
-            current: lexer.next().unwrap_or(Token::default()),
-            peek: lexer.next().unwrap_or(Token::default()),
+            current: lexer.next().unwrap_or_default(),
+            peek: lexer.next().unwrap_or_default(),
             lexer,
             nodes: Vec::with_capacity(16),
         }
@@ -313,7 +310,7 @@ impl<'a> Parser<'a> {
             .get(
                 start_token.start() as usize..(start_token.start() + start_token.length()) as usize,
             )
-            .map(|s| s.to_uppercase())
+            .map(|s| s.to_ascii_uppercase())
         {
             Some(command) => command,
             None => unreachable!(),
@@ -326,7 +323,7 @@ impl<'a> Parser<'a> {
         }
         param_ids.reverse();
 
-        match command_str.as_str() {
+        match command_str.as_slice() {
             strings::PING => Ok(self.store_node(
                 NodeKind::CommandPing {
                     token: self.get_required_param(&mut param_ids)?,
@@ -525,7 +522,7 @@ mod tests {
 
     #[test]
     fn test_parser_tags1() {
-        let input = "@id=234AB;foo ";
+        let input = "@id=234AB;foo ".as_bytes();
         let mut parser = Parser::new(input);
         assert_eq!(Ok(NodeId(5)), parser.parse_tags());
         let expected = vec![
@@ -559,7 +556,7 @@ mod tests {
 
     #[test]
     fn test_parse_source1() {
-        let input = ":dan!d@localhost ";
+        let input = ":dan!d@localhost ".as_bytes();
         let mut parser = Parser::new(input);
         assert_eq!(Ok(NodeId(3)), parser.parse_source());
         let expected = vec![
@@ -585,7 +582,7 @@ mod tests {
 
     #[test]
     fn test_parse_command1() {
-        let input = "PRIVMSG #chan :Hey what's up!\r\n";
+        let input = "PRIVMSG #chan :Hey what's up!\r\n".as_bytes();
         let mut parser = Parser::new(input);
         assert_eq!(Ok(NodeId(2)), parser.parse_command());
         let expected = vec![
@@ -609,7 +606,7 @@ mod tests {
 
     #[test]
     fn test_parse_message1() {
-        let input = "@id=234AB;foo :dan!d@localhost PRIVMSG #chan :Hey what's up!\r\n";
+        let input = "@id=234AB;foo :dan!d@localhost PRIVMSG #chan :Hey what's up!\r\n".as_bytes();
         let mut parser = Parser::new(input);
         assert_eq!(Ok(NodeId(13)), parser.parse_message());
         let expected = vec![

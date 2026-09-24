@@ -19,7 +19,7 @@ impl<T> Index<NodeId> for Nodes<T> {
 
 #[derive(Debug, Clone)]
 pub struct Message {
-    text: Box<str>,
+    text: Box<[u8]>,
     tags_id: Option<NodeId>,
     source_id: Option<NodeId>,
     command_id: NodeId,
@@ -112,27 +112,31 @@ pub enum Command<'a> {
 }
 
 impl<'a> Command<'a> {
+    fn command_to_str(command: &[u8]) -> &str {
+        str::from_utf8(command).expect("predefined string must be valid utf8")
+    }
+
     pub fn command(&self) -> &str {
         match self {
-            Self::PING { .. } => strings::PING,
-            Self::PONG { .. } => strings::PONG,
+            Self::PING { .. } => Self::command_to_str(strings::PING),
+            Self::PONG { .. } => Self::command_to_str(strings::PONG),
 
-            Self::CAP { .. } => strings::CAP,
-            Self::PASS { .. } => strings::PASS,
-            Self::NICK { .. } => strings::NICK,
-            Self::USER { .. } => strings::USER,
-            Self::QUIT { .. } => strings::QUIT,
+            Self::CAP { .. } => Self::command_to_str(strings::CAP),
+            Self::PASS { .. } => Self::command_to_str(strings::PASS),
+            Self::NICK { .. } => Self::command_to_str(strings::NICK),
+            Self::USER { .. } => Self::command_to_str(strings::USER),
+            Self::QUIT { .. } => Self::command_to_str(strings::QUIT),
 
-            Self::JOIN { .. } => strings::JOIN,
-            Self::PRIVMSG { .. } => strings::PRIVMSG,
+            Self::JOIN { .. } => Self::command_to_str(strings::JOIN),
+            Self::PRIVMSG { .. } => Self::command_to_str(strings::PRIVMSG),
 
-            Self::RPLWELCOME { .. } => strings::RPL_WELCOME,
-            Self::RPLYOURHOST { .. } => strings::RPL_YOURHOST,
-            Self::RPLCREATED { .. } => strings::RPL_CREATED,
-            Self::RPLMYINFO { .. } => strings::RPL_MYINFO,
+            Self::RPLWELCOME { .. } => Self::command_to_str(strings::RPL_WELCOME),
+            Self::RPLYOURHOST { .. } => Self::command_to_str(strings::RPL_YOURHOST),
+            Self::RPLCREATED { .. } => Self::command_to_str(strings::RPL_CREATED),
+            Self::RPLMYINFO { .. } => Self::command_to_str(strings::RPL_MYINFO),
 
-            Self::ERRPASSWDMISMATCH { .. } => strings::ERR_PASSWDMISMATCH,
-            Self::ERRNICKNAMEINUSE { .. } => strings::ERR_NICKNAMEINUSE,
+            Self::ERRPASSWDMISMATCH { .. } => Self::command_to_str(strings::ERR_PASSWDMISMATCH),
+            Self::ERRNICKNAMEINUSE { .. } => Self::command_to_str(strings::ERR_NICKNAMEINUSE),
         }
     }
 
@@ -223,36 +227,34 @@ pub struct MessageBuilder<'a> {
 
 impl Message {
     pub fn new(input: &[u8]) -> Result<Self, IrcError> {
-        let text = String::from_utf8(input.to_vec())
-            .map_err(|_| IrcError::NonUtf8Input)?
-            .into_boxed_str();
-
-        let mut parser = Parser::new(text.as_ref());
-        let root = match parser.parse_message() {
+        let mut parser = Parser::new(input);
+        let root_id = match parser.parse_message() {
             Ok(root) => root,
             Err(err) => {
                 return Err(IrcError::ParseError(err));
             }
         };
         let nodes = Nodes(parser.get_nodes());
+        let root_node = nodes.index(root_id);
 
-        match nodes.index(root.clone()).kind() {
+        match root_node.kind() {
             NodeKind::Message {
                 tags,
                 source,
                 command,
             } => {
-                let mut text: String = text.into();
-                text.truncate(nodes.index(root).length());
+                let length = root_node.length();
+                let mut text: Vec<u8> = Vec::with_capacity(length);
+                text.extend_from_slice(&input[..length]);
                 Ok(Self {
-                    text: text.into_boxed_str(),
+                    text: text.into_boxed_slice(),
                     tags_id: tags.clone(),
                     source_id: source.clone(),
                     command_id: command.clone(),
                     nodes,
                 })
             }
-            _ => unreachable!(),
+            _ => unreachable!("root node must be of kind Message"),
         }
     }
 
@@ -262,11 +264,12 @@ impl Message {
 
     fn get_value(&self, id: NodeId) -> &str {
         let node = self.nodes.index(id);
-        &self.text[node.start()..node.start() + node.length()]
+        str::from_utf8(&self.text[node.start()..node.start() + node.length()])
+            .expect("value is parsed")
     }
 
     pub fn contents(&self) -> &str {
-        &self.text
+        str::from_utf8(&self.text).expect("value is parsed")
     }
 
     pub fn get_command(&self) -> Command<'_> {

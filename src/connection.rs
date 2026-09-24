@@ -105,10 +105,6 @@ impl Connection {
                     return Ok(message);
                 }
                 Err(IrcError::ConnectionError) => unreachable!(),
-                Err(IrcError::NonUtf8Input) => {
-                    self.cursor = self.length;
-                    return Err(IrcError::NonUtf8Input);
-                }
                 Err(IrcError::ParseError(err)) => match err.kind {
                     ParserErrorKind::MissingEndOfMessage => {
                         if self.cursor > 0 {
