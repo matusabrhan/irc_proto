@@ -15,7 +15,6 @@ pub(crate) struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     pub(crate) fn new(input: &'a str) -> Self {
-        // let mut input = input.chars();
         let mut input = input.as_bytes().iter();
         Self {
             cursor: 0,
@@ -40,8 +39,12 @@ impl<'a> Lexer<'a> {
             self.read_char();
         }
     }
+}
 
-    pub(crate) fn next_token(&mut self) -> Token {
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
         let token = match *self.current {
             strings::SPACE => Token::new(TokenKind::Space, self.cursor, 1),
             strings::AT => Token::new(TokenKind::At, self.cursor, 1),
@@ -63,11 +66,19 @@ impl<'a> Lexer<'a> {
             strings::MINUS => Token::new(TokenKind::Minus, self.cursor, 1),
             strings::PLUS => Token::new(TokenKind::Plus, self.cursor, 1),
             strings::DOLLAR_SIGN => Token::new(TokenKind::DollarSign, self.cursor, 1),
-            strings::CR => match self.peek.eq(&strings::LF) {
-                true => return Token::new(TokenKind::EndOfMessage, self.cursor, 2),
-                false => return Token::new(TokenKind::EndOfMessage, self.cursor, 1),
-            },
-            strings::LF => return Token::new(TokenKind::EndOfMessage, self.cursor, 1),
+            strings::CR => {
+                self.current = &strings::NULL;
+                match self.peek.eq(&strings::LF) {
+                    true => return Some(Token::new(TokenKind::EndOfMessage, self.cursor, 2)),
+                    false => return Some(Token::new(TokenKind::EndOfMessage, self.cursor, 1)),
+                }
+            }
+            strings::LF => {
+                self.current = &strings::NULL;
+                return Some(Token::new(TokenKind::EndOfMessage, self.cursor, 1));
+            }
+
+            strings::NULL => return None,
 
             c if c.is_ascii_alphanumeric() => {
                 let start = self.cursor;
@@ -76,11 +87,13 @@ impl<'a> Lexer<'a> {
                 Token::new(TokenKind::Text, start, stop - start)
             }
 
-            _ => return Token::new(TokenKind::Invalid, self.cursor, 0),
+            _ => {
+                return None;
+            }
         };
         self.read_char();
 
-        token
+        Some(token)
     }
 }
 
@@ -96,21 +109,18 @@ mod tests {
         let input = "aaaa @:bbbbb ab123cd\rasdfasdf";
         let mut lexer = Lexer::new(input);
 
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 0, 4));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Space, 4, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::At, 5, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Colon, 6, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 7, 5));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Space, 12, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 13, 7));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 0, 4));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 4, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::At, 5, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Colon, 6, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 7, 5));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 12, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 13, 7));
         assert_eq!(
-            lexer.next_token(),
+            lexer.next().unwrap(),
             Token::new(TokenKind::EndOfMessage, 20, 1)
         );
-        assert_eq!(
-            lexer.next_token(),
-            Token::new(TokenKind::EndOfMessage, 20, 1)
-        );
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
@@ -118,37 +128,37 @@ mod tests {
         let input = "@id=234AB :dan!d@localhost PRIVMSG #chan :Hey what's up!\r\n";
         let mut lexer = Lexer::new(input);
 
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::At, 0, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 1, 2));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Equals, 3, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 4, 5));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Space, 9, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Colon, 10, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 11, 3));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Bang, 14, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 15, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::At, 16, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 17, 9));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Space, 26, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 27, 7));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Space, 34, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Hash, 35, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 36, 4));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Space, 40, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Colon, 41, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 42, 3));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Space, 45, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 46, 4));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::At, 0, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 1, 2));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Equals, 3, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 4, 5));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 9, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Colon, 10, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 11, 3));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Bang, 14, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 15, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::At, 16, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 17, 9));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 26, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 27, 7));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 34, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Hash, 35, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 36, 4));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 40, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Colon, 41, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 42, 3));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 45, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 46, 4));
         assert_eq!(
-            lexer.next_token(),
+            lexer.next().unwrap(),
             Token::new(TokenKind::SingleQuote, 50, 1)
         );
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 51, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Space, 52, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 53, 2));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Bang, 55, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 51, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Space, 52, 1));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 53, 2));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Bang, 55, 1));
         assert_eq!(
-            lexer.next_token(),
+            lexer.next().unwrap(),
             Token::new(TokenKind::EndOfMessage, 56, 2)
         );
     }
@@ -158,9 +168,8 @@ mod tests {
         let input = "a^b";
         let mut lexer = Lexer::new(input);
 
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Text, 0, 1));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Invalid, 1, 0));
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Invalid, 1, 0));
+        assert_eq!(lexer.next().unwrap(), Token::new(TokenKind::Text, 0, 1));
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
@@ -168,6 +177,6 @@ mod tests {
         let input = "";
         let mut lexer = Lexer::new(input);
 
-        assert_eq!(lexer.next_token(), Token::new(TokenKind::Invalid, 0, 0));
+        assert_eq!(lexer.next(), None);
     }
 }

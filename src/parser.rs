@@ -29,28 +29,39 @@ pub struct ParserError {
     pub kind: ParserErrorKind,
 }
 
+impl<'a> Iterator for Parser<'a> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let last: Token = std::mem::take(&mut self.current);
+        self.current = std::mem::replace(
+            &mut self.peek,
+            self.lexer.next().unwrap_or(Token::default()),
+        );
+        if self.current == Token::default() {
+            return None;
+        }
+        Some(last)
+    }
+}
+
 impl<'a> Parser<'a> {
     pub(crate) fn new(input: &'a str) -> Self {
         let mut lexer = Lexer::new(input);
         Self {
             input,
-            current: lexer.next_token(),
-            peek: lexer.next_token(),
+            current: lexer.next().unwrap_or(Token::default()),
+            peek: lexer.next().unwrap_or(Token::default()),
             lexer,
             nodes: Vec::with_capacity(16),
         }
     }
 
     fn next_token(&mut self) -> Result<Token, ParserError> {
-        let last: Token = std::mem::take(&mut self.current);
-        self.current = std::mem::replace(&mut self.peek, self.lexer.next_token());
-        if self.current.kind() == TokenKind::Invalid {
-            return Err(ParserError {
-                offset: self.current.start() as usize,
-                kind: ParserErrorKind::InvalidToken,
-            });
-        }
-        Ok(last)
+        self.next().ok_or(ParserError {
+            offset: self.current.start() as usize,
+            kind: ParserErrorKind::InvalidToken,
+        })
     }
 
     fn store_node(&mut self, kind: NodeKind, start: u16, length: u16) -> NodeId {
@@ -284,11 +295,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn pop_or_missing(&self, param_ids: &mut Vec<NodeId>) -> Result<NodeId, ParserError> {
+    fn get_required_param(&self, param_ids: &mut Vec<NodeId>) -> Result<NodeId, ParserError> {
         param_ids.pop().ok_or(ParserError {
             offset: self.current.start() as usize,
             kind: ParserErrorKind::MissingCommand,
         })
+    }
+
+    fn get_optional_param(&self, param_ids: &mut Vec<NodeId>) -> Option<NodeId> {
+        param_ids.pop()
     }
 
     pub(crate) fn parse_command(&mut self) -> Result<NodeId, ParserError> {
@@ -314,37 +329,36 @@ impl<'a> Parser<'a> {
         match command_str.as_str() {
             strings::PING => Ok(self.store_node(
                 NodeKind::CommandPing {
-                    token: self.pop_or_missing(&mut param_ids)?,
+                    token: self.get_required_param(&mut param_ids)?,
                 },
                 start_token.start(),
                 self.current.start() - start_token.start(),
             )),
             strings::PONG => {
-                let param1 = self.pop_or_missing(&mut param_ids)?;
-                if let Some(param2) = param_ids.pop() {
-                    return Ok(self.store_node(
+                let param1 = self.get_required_param(&mut param_ids)?;
+                match self.get_optional_param(&mut param_ids) {
+                    Some(param2) => Ok(self.store_node(
                         NodeKind::CommandPong {
                             server: Some(param1),
                             token: param2,
                         },
                         start_token.start(),
                         self.current.start() - start_token.start(),
-                    ));
+                    )),
+                    None => Ok(self.store_node(
+                        NodeKind::CommandPong {
+                            server: None,
+                            token: param1,
+                        },
+                        start_token.start(),
+                        self.current.start() - start_token.start(),
+                    )),
                 }
-
-                Ok(self.store_node(
-                    NodeKind::CommandPong {
-                        server: None,
-                        token: param1,
-                    },
-                    start_token.start(),
-                    self.current.start() - start_token.start(),
-                ))
             }
 
             strings::CAP => Ok(self.store_node(
                 NodeKind::CommandCap {
-                    subcommand: self.pop_or_missing(&mut param_ids)?,
+                    subcommand: self.get_required_param(&mut param_ids)?,
                     capabilities: param_ids.pop(),
                 },
                 start_token.start(),
@@ -352,24 +366,24 @@ impl<'a> Parser<'a> {
             )),
             strings::PASS => Ok(self.store_node(
                 NodeKind::CommandPass {
-                    password: self.pop_or_missing(&mut param_ids)?,
+                    password: self.get_required_param(&mut param_ids)?,
                 },
                 start_token.start(),
                 self.current.start() - start_token.start(),
             )),
             strings::NICK => Ok(self.store_node(
                 NodeKind::CommandNick {
-                    nickname: self.pop_or_missing(&mut param_ids)?,
+                    nickname: self.get_required_param(&mut param_ids)?,
                 },
                 start_token.start(),
                 self.current.start() - start_token.start(),
             )),
             strings::USER => Ok(self.store_node(
                 NodeKind::CommandUser {
-                    user: self.pop_or_missing(&mut param_ids)?,
-                    mode: self.pop_or_missing(&mut param_ids)?,
-                    unused: self.pop_or_missing(&mut param_ids)?,
-                    realname: self.pop_or_missing(&mut param_ids)?,
+                    user: self.get_required_param(&mut param_ids)?,
+                    mode: self.get_required_param(&mut param_ids)?,
+                    unused: self.get_required_param(&mut param_ids)?,
+                    realname: self.get_required_param(&mut param_ids)?,
                 },
                 start_token.start(),
                 self.current.start() - start_token.start(),
@@ -384,7 +398,7 @@ impl<'a> Parser<'a> {
 
             strings::JOIN => Ok(self.store_node(
                 NodeKind::CommandJoin {
-                    channels: self.pop_or_missing(&mut param_ids)?,
+                    channels: self.get_required_param(&mut param_ids)?,
                     keys: param_ids.pop(),
                 },
                 start_token.start(),
@@ -392,8 +406,8 @@ impl<'a> Parser<'a> {
             )),
             strings::PRIVMSG => Ok(self.store_node(
                 NodeKind::CommandPrivMsg {
-                    targets: self.pop_or_missing(&mut param_ids)?,
-                    text: self.pop_or_missing(&mut param_ids)?,
+                    targets: self.get_required_param(&mut param_ids)?,
+                    text: self.get_required_param(&mut param_ids)?,
                 },
                 start_token.start(),
                 self.current.start() - start_token.start(),
@@ -401,35 +415,35 @@ impl<'a> Parser<'a> {
 
             strings::RPL_WELCOME => Ok(self.store_node(
                 NodeKind::RplWelcome {
-                    client: self.pop_or_missing(&mut param_ids)?,
-                    text: self.pop_or_missing(&mut param_ids)?,
+                    client: self.get_required_param(&mut param_ids)?,
+                    text: self.get_required_param(&mut param_ids)?,
                 },
                 start_token.start(),
                 self.current.start() - start_token.start(),
             )),
             strings::RPL_YOURHOST => Ok(self.store_node(
                 NodeKind::RplYourhost {
-                    client: self.pop_or_missing(&mut param_ids)?,
-                    text: self.pop_or_missing(&mut param_ids)?,
+                    client: self.get_required_param(&mut param_ids)?,
+                    text: self.get_required_param(&mut param_ids)?,
                 },
                 start_token.start(),
                 self.current.start() - start_token.start(),
             )),
             strings::RPL_CREATED => Ok(self.store_node(
                 NodeKind::RplCreated {
-                    client: self.pop_or_missing(&mut param_ids)?,
-                    text: self.pop_or_missing(&mut param_ids)?,
+                    client: self.get_required_param(&mut param_ids)?,
+                    text: self.get_required_param(&mut param_ids)?,
                 },
                 start_token.start(),
                 self.current.start() - start_token.start(),
             )),
             strings::RPL_MYINFO => Ok(self.store_node(
                 NodeKind::RplMyinfo {
-                    client: self.pop_or_missing(&mut param_ids)?,
-                    servername: self.pop_or_missing(&mut param_ids)?,
-                    version: self.pop_or_missing(&mut param_ids)?,
-                    user_modes: self.pop_or_missing(&mut param_ids)?,
-                    channel_modes: self.pop_or_missing(&mut param_ids)?,
+                    client: self.get_required_param(&mut param_ids)?,
+                    servername: self.get_required_param(&mut param_ids)?,
+                    version: self.get_required_param(&mut param_ids)?,
+                    user_modes: self.get_required_param(&mut param_ids)?,
+                    channel_modes: self.get_required_param(&mut param_ids)?,
                 },
                 start_token.start(),
                 self.current.start() - start_token.start(),
@@ -437,7 +451,7 @@ impl<'a> Parser<'a> {
 
             strings::ERR_PASSWDMISMATCH => Ok(self.store_node(
                 NodeKind::ErrPasswdmismatch {
-                    client: self.pop_or_missing(&mut param_ids)?,
+                    client: self.get_required_param(&mut param_ids)?,
                 },
                 start_token.start(),
                 self.current.start() - start_token.start(),
@@ -445,8 +459,8 @@ impl<'a> Parser<'a> {
 
             strings::ERR_NICKNAMEINUSE => Ok(self.store_node(
                 NodeKind::ErrNicknameinuse {
-                    client: self.pop_or_missing(&mut param_ids)?,
-                    nick: self.pop_or_missing(&mut param_ids)?,
+                    client: self.get_required_param(&mut param_ids)?,
+                    nick: self.get_required_param(&mut param_ids)?,
                 },
                 start_token.start(),
                 self.current.start() - start_token.start(),
@@ -505,14 +519,13 @@ mod tests {
 
     use crate::{
         ast::{Node, NodeId, NodeKind},
-        enable_logging,
         parser::Parser,
         token::{Token, TokenKind},
     };
 
     #[test]
     fn test_parser_tags1() {
-        let input = "@id=234AB;foo \r\n";
+        let input = "@id=234AB;foo ";
         let mut parser = Parser::new(input);
         assert_eq!(Ok(NodeId(5)), parser.parse_tags());
         let expected = vec![

@@ -1,5 +1,5 @@
 #[derive(Debug, PartialEq, Eq, Default, Clone)]
-pub(crate) struct Token {
+pub struct Token {
     start: u16,
     length: u16,
     kind: TokenKind,
@@ -30,7 +30,7 @@ pub enum TokenKind {
     DollarSign,
     EndOfMessage,
     #[default]
-    Invalid,
+    Null,
 }
 
 impl Token {

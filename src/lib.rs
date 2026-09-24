@@ -61,6 +61,7 @@ pub mod strings {
     pub const MINUS: u8 = b'-';
     pub const PLUS: u8 = b'+';
     pub const DOLLAR_SIGN: u8 = b'+';
+    pub const NULL: u8 = b'\0';
 }
 
 pub fn enable_logging() {
