@@ -69,8 +69,6 @@ impl<'a> Iterator for Lexer<'a> {
                 return Some(Token::new(TokenKind::EndOfMessage, self.cursor, 1));
             }
 
-            strings::NULL => return None,
-
             c if c.is_ascii_alphanumeric() => {
                 let start = self.cursor;
                 self.read_string();
@@ -80,7 +78,9 @@ impl<'a> Iterator for Lexer<'a> {
 
             c if c.is_ascii_graphic() => Token::new(TokenKind::Graphic, self.cursor, 1),
 
-            _ => return None,
+            strings::NULL => return None,
+
+            _ => Token::new(TokenKind::Invalid, self.cursor, 1),
         };
         self.read_char();
 

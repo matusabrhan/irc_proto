@@ -32,8 +32,8 @@ impl<'a> Iterator for Parser<'a> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let last = std::mem::replace(&mut self.current, self.lexer.next().unwrap_or_default());
-        if self.current.kind() == TokenKind::Null {
+        let last = std::mem::replace(&mut self.current, self.lexer.next()?);
+        if self.current.kind() == TokenKind::Invalid {
             return None;
         }
         Some(last)
@@ -52,10 +52,17 @@ impl<'a> Parser<'a> {
     }
 
     fn next_token(&mut self) -> Result<Token, ParserError> {
-        self.next().ok_or(ParserError {
-            offset: self.current.start() as usize,
-            kind: ParserErrorKind::InvalidToken,
-        })
+        self.next()
+            .ok_or_else(|| match self.current.kind() == TokenKind::Invalid {
+                true => ParserError {
+                    offset: self.current.start() as usize,
+                    kind: ParserErrorKind::InvalidToken,
+                },
+                false => ParserError {
+                    offset: self.current.start() as usize,
+                    kind: ParserErrorKind::MissingEndOfMessage,
+                },
+            })
     }
 
     fn store_node(&mut self, kind: NodeKind, start: u16, length: u16) -> NodeId {

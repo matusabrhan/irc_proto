@@ -15,23 +15,14 @@ pub enum TokenKind {
     Semicolon,
     Lesser,
     Equals,
-    // Greater,
     Bang,
     QuestionMark,
-    // Hash,
-    // SingleQuote,
-    // DoubleQuote,
-    // Slash,
     Asterisk,
-    // Period,
     Comma,
-    // Dash,
-    // Minus,
-    // Plus,
     DollarSign,
     EndOfMessage,
     #[default]
-    Null,
+    Invalid,
 }
 
 impl Token {
