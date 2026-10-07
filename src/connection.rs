@@ -8,138 +8,224 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::message::Message;
 use crate::parser::ParserErrorKind;
 use crate::IrcError;
+use crate::{message::Message, parser::ParserError};
 
 const MAX_MESSAGE_SIZE: usize = 512;
 const BUFFER_SIZE: usize = 1024 * 2;
 
 #[derive(Debug)]
-struct Transport {
-    #[cfg(feature = "std-stream")]
-    stream: std::net::TcpStream,
-    #[cfg(feature = "tokio-stream")]
-    stream: tokio::net::TcpStream,
-    buffer: [u8; BUFFER_SIZE],
-    length: usize,
-    cursor: usize,
+struct Transport<S> {
+    stream: S,
+    decoder: IrcDecoder,
+    encoder: IrcEncoder,
 }
 
-#[cfg(feature = "std-stream")]
-impl Transport {
-    pub fn new(stream: std::net::TcpStream) -> Self {
-        Self {
-            stream,
-            buffer: [0; BUFFER_SIZE],
-            length: 0,
-            cursor: 0,
+#[derive(Debug)]
+struct IrcDecoder {
+    buffer: [u8; BUFFER_SIZE],
+    cursor: u16,
+    length: u16,
+}
+
+#[derive(Debug)]
+struct IrcEncoder {
+    buffer: [u8; MAX_MESSAGE_SIZE],
+    cursor: u16,
+    length: u16,
+}
+
+impl IrcDecoder {
+    fn decode(&mut self) -> Result<Option<Message>, ParserError> {
+        match Message::new(&self.buffer[self.cursor as usize..self.length as usize]) {
+            Ok(message) => {
+                self.buffer
+                    .copy_within(self.cursor as usize..self.length as usize, 0);
+                self.cursor = 0;
+                self.length -= message.contents().len() as u16;
+                Ok(Some(message))
+            }
+            Err(err) => match err.kind {
+                ParserErrorKind::MissingEndOfMessage => {
+                    if self.cursor > 0 {
+                        self.buffer
+                            .copy_within(self.cursor as usize..self.length as usize, 0);
+                        self.length -= self.cursor;
+                        self.cursor = 0
+                    }
+                    if self.length as usize >= MAX_MESSAGE_SIZE {
+                        self.cursor = self.length;
+                        return Err(err);
+                    }
+                    Ok(None)
+                }
+                _ => {
+                    self.cursor += err.offset as u16;
+                    Err(err)
+                }
+            },
         }
     }
 
+    fn has_remaining(&self) -> bool {
+        self.cursor < self.length
+    }
+
+    fn set_length(&mut self, length: usize) {
+        self.length = length as u16;
+        self.cursor = 0;
+    }
+
+    fn buffer_mut(&mut self) -> &mut [u8] {
+        &mut self.buffer[self.length as usize..]
+    }
+
+    fn update_length(&mut self, length: usize) {
+        self.length += length as u16
+    }
+}
+
+impl IrcEncoder {
+    fn load(&mut self, msg: Message) {
+        let contents = msg.contents().as_bytes();
+        self.buffer[..contents.len()].copy_from_slice(contents);
+        self.cursor = 0;
+        self.length = contents.len() as u16;
+    }
+
+    fn encode(&self) -> &[u8] {
+        &self.buffer[self.cursor as usize..self.length as usize]
+    }
+
+    fn has_remaining(&self) -> bool {
+        self.cursor < self.length
+    }
+
+    fn update_cursor(&mut self, read: usize) {
+        self.cursor += read as u16;
+    }
+}
+
+impl<S> Transport<S> {
+    pub fn new(stream: S) -> Self {
+        Self {
+            stream,
+            decoder: IrcDecoder {
+                buffer: [0; BUFFER_SIZE],
+                cursor: 0,
+                length: 0,
+            },
+            encoder: IrcEncoder {
+                buffer: [0; MAX_MESSAGE_SIZE],
+                cursor: 0,
+                length: 0,
+            },
+        }
+    }
+}
+
+#[cfg(feature = "std-stream")]
+impl<S: Read + Write + Unpin> Transport<S> {
     pub fn read(&mut self) -> Result<Message, IrcError> {
-        if self.cursor >= self.length {
-            self.length = self
+        if !self.decoder.has_remaining() {
+            match self
                 .stream
-                .read(&mut self.buffer)
-                .map_err(|_| IrcError::ConnectionError)?;
-            self.cursor = 0;
+                .read(self.decoder.buffer_mut())
+                .map_err(|err| IrcError::ConnectionError(err))?
+            {
+                0 => return Err(IrcError::EOF),
+                n => self.decoder.set_length(n),
+            };
         }
 
-        match Message::new(&self.buffer[self.cursor..self.length]) {
-            Ok(message) => {
-                self.cursor += message.contents().len();
-                Ok(message)
-            }
-            Err(IrcError::ParseError(err)) => {
-                self.cursor += err.offset;
-                Err(IrcError::ParseError(err))
-            }
-            Err(IrcError::ConnectionError) => unreachable!(),
+        loop {
+            match self
+                .decoder
+                .decode()
+                .map_err(|err| IrcError::ParseError(err))?
+            {
+                Some(message) => return Ok(message),
+                None => {
+                    match self
+                        .stream
+                        .read(self.decoder.buffer_mut())
+                        .map_err(|err| IrcError::ConnectionError(err))?
+                    {
+                        0 => return Err(IrcError::EOF),
+                        n => self.decoder.update_length(n),
+                    };
+                }
+            };
         }
     }
 
     pub fn write(&mut self, msg: Message) -> Result<(), IrcError> {
-        self.stream
-            .write_all(msg.contents().as_bytes())
-            .map_err(|_| IrcError::ConnectionError)?;
+        self.encoder.load(msg);
+        while self.encoder.has_remaining() {
+            match self
+                .stream
+                .write(self.encoder.encode())
+                .map_err(|err| IrcError::ConnectionError(err))?
+            {
+                0 => return Err(IrcError::EOF),
+                n => self.encoder.update_cursor(n),
+            }
+        }
         Ok(())
     }
 
-    pub fn close(&mut self) -> Result<(), ()> {
-        self.stream
-            .shutdown(std::net::Shutdown::Both)
-            .map_err(|_| ())
+    pub fn close(self) {
+        drop(self.stream)
     }
 }
 
 #[cfg(feature = "tokio-stream")]
-impl Transport {
-    pub fn new(stream: tokio::net::TcpStream) -> Self {
-        Self {
-            stream,
-            buffer: [0; BUFFER_SIZE],
-            length: 0,
-            cursor: 0,
-        }
-    }
-
+impl<S: AsyncReadExt + AsyncWriteExt + Unpin> Transport<S> {
     pub async fn read(&mut self) -> Result<Message, IrcError> {
-        if self.cursor >= self.length {
-            self.length = match self
+        if !self.decoder.has_remaining() {
+            match self
                 .stream
-                .read(&mut self.buffer)
+                .read(self.decoder.buffer_mut())
                 .await
-                .map_err(|err| IrcError::ConnectionError(err))?
+                .map_err(IrcError::ConnectionError)?
             {
                 0 => return Err(IrcError::EOF),
-                n => n,
+                n => self.decoder.set_length(n),
             };
-            self.cursor = 0;
         }
 
         loop {
-            match Message::new(&self.buffer[self.cursor..self.length]) {
-                Ok(message) => {
-                    self.cursor += message.contents().len();
-                    return Ok(message);
+            match self.decoder.decode().map_err(IrcError::ParseError)? {
+                Some(message) => return Ok(message),
+                None => {
+                    match self
+                        .stream
+                        .read(self.decoder.buffer_mut())
+                        .await
+                        .map_err(IrcError::ConnectionError)?
+                    {
+                        0 => return Err(IrcError::EOF),
+                        n => self.decoder.update_length(n),
+                    };
                 }
-                Err(err) => match err.kind {
-                    ParserErrorKind::MissingEndOfMessage => {
-                        if self.cursor > 0 {
-                            self.buffer.copy_within(self.cursor..self.length, 0);
-                            self.length -= self.cursor;
-                            self.cursor = 0
-                        }
-                        if self.length >= MAX_MESSAGE_SIZE {
-                            self.cursor = self.length;
-                            return Err(IrcError::ParseError(err));
-                        }
-                        self.length += match self
-                            .stream
-                            .read(&mut self.buffer[self.length..])
-                            .await
-                            .map_err(|err| IrcError::ConnectionError(err))?
-                        {
-                            0 => return Err(IrcError::EOF),
-                            n => n,
-                        };
-                    }
-                    _ => {
-                        self.cursor += err.offset;
-                        return Err(IrcError::ParseError(err));
-                    }
-                },
             };
         }
     }
 
     pub async fn write(&mut self, msg: Message) -> Result<(), IrcError> {
-        self.stream
-            .write_all(msg.contents().as_bytes())
-            .await
-            .map_err(|err| IrcError::ConnectionError(err))?;
-
+        self.encoder.load(msg);
+        while self.encoder.has_remaining() {
+            match self
+                .stream
+                .write(self.encoder.encode())
+                .await
+                .map_err(IrcError::ConnectionError)?
+            {
+                0 => return Err(IrcError::EOF),
+                n => self.encoder.update_cursor(n),
+            }
+        }
         Ok(())
     }
 
@@ -147,11 +233,12 @@ impl Transport {
         self.stream
             .shutdown()
             .await
-            .map_err(|err| IrcError::ConnectionError(err))?;
+            .map_err(IrcError::ConnectionError)?;
         Ok(())
     }
 }
 
+#[cfg(feature = "tokio-stream")]
 pub enum IrcEvent {
     Message(Message),
     Error(IrcError),
@@ -173,17 +260,17 @@ impl Connection {
         let (source_tx, mut sink_rx) = mpsc::channel::<Message>(channel_size);
         let (sink_tx, source_rx) = mpsc::channel::<IrcEvent>(channel_size);
 
-        let mut conn = Transport::new(stream);
+        let mut transport = Transport::new(stream);
         let handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    msg = conn.read() => {
+                    msg = transport.read() => {
                         match msg {
                             Ok(msg) => {
-                                sink_tx.send(IrcEvent::Message(msg)).await;
+                                sink_tx.send(IrcEvent::Message(msg)).await.ok();
                             }
                             Err(err) => {
-                                sink_tx.send(IrcEvent::Error(err)).await;
+                                sink_tx.send(IrcEvent::Error(err)).await.ok();
                             },
                         }
                     }
@@ -191,10 +278,12 @@ impl Connection {
                     msg = sink_rx.recv() => {
                         match msg {
                             Some(msg) => {
-                                conn.write(msg).await;
+                                if let Err(err) = transport.write(msg).await {
+                                    sink_tx.send(IrcEvent::Error(err)).await.ok();
+                                }
                             }
                             None => {
-                                sink_tx.send(IrcEvent::Closed).await;
+                                sink_tx.send(IrcEvent::Closed).await.ok();
                             },
                         }
                     }
@@ -202,7 +291,7 @@ impl Connection {
                 }
             }
             sink_rx.close();
-            conn.close().await;
+            transport.close().await.ok();
         });
 
         Self {
@@ -217,8 +306,8 @@ impl Connection {
         self.rx.recv().await
     }
 
-    pub async fn send(&self, msg: Message) -> Result<(), ()> {
-        self.tx.send(msg).await.map_err(|_| ())
+    pub async fn send(&self, msg: Message) -> Result<(), mpsc::error::SendError<Message>> {
+        self.tx.send(msg).await
     }
 
     pub async fn stop(self) -> Result<(), tokio::task::JoinError> {
@@ -237,17 +326,47 @@ mod tests {
 
     use crate::{
         connection::Transport,
+        enable_logging,
         message::{Command, MessageBuilder},
     };
+
+    // fn start_listen() -> (TcpListener, SocketAddr) {
+    //     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    //     let addr = listener.local_addr().unwrap();
+    //     return (listener, addr);
+    // }
+    //
+    // #[test]
+    // fn test_transport_write1() {
+    //     let (listener, _) = start_listen();
+    //     let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    //     let (mut server, _) = listener.accept().unwrap();
+    //     let mut client = Transport::new(stream);
+    //
+    //     let message = MessageBuilder::with_command(Command::PRIVMSG {
+    //         targets: "#chan",
+    //         text: "Hello",
+    //     })
+    //     .build()
+    //     .unwrap();
+    //     client.write(message).unwrap();
+    //
+    //     let mut buf = String::new();
+    //     server.read_to_string(&mut buf);
+    //
+    //     assert_eq!("PRIVMSG #chan Hello\r\n", buf);
+    // }
 
     fn start_listen() -> (TcpListener, SocketAddr) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
+        log::info!("Server listening on {}", addr);
         return (listener, addr);
     }
 
     #[test]
     fn test_transport_write1() {
+        enable_logging();
         let (listener, _) = start_listen();
         let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (mut server, _) = listener.accept().unwrap();
@@ -262,10 +381,11 @@ mod tests {
         client.write(message).unwrap();
         client.close();
 
-        let mut buf = String::new();
-        server.read_to_string(&mut buf);
+        let mut res = String::new();
+        server.read_to_string(&mut res).unwrap();
 
-        assert_eq!("PRIVMSG #chan Hello\r\n", buf);
+        assert_eq!("PRIVMSG #chan Hello\r\n", res);
+        server.shutdown(std::net::Shutdown::Both).unwrap();
     }
 
     #[test]
@@ -298,7 +418,7 @@ mod tests {
         client.close();
 
         let mut buf = String::new();
-        server.read_to_string(&mut buf);
+        server.read_to_string(&mut buf).unwrap();
 
         assert_eq!(
             "PASS password\r\nUSER username_user1 0 * realname_user1\r\nNICK nick1\r\n",
@@ -432,6 +552,7 @@ mod tests {
         server.write_all(b"PRIVMSG ").await.unwrap();
         tokio::spawn(async move {
             server.write_all(b"#ch").await.unwrap();
+            server.flush().await.unwrap();
             server.write_all(b"an Hello\r\n").await.unwrap();
 
             sleep(Duration::from_secs(1)).await;
