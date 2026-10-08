@@ -26,6 +26,7 @@ pub enum ParserErrorKind {
 pub struct ParserError {
     pub offset: usize,
     pub kind: ParserErrorKind,
+    pub end: usize,
 }
 
 impl<'a> Iterator for Parser<'a> {
@@ -51,16 +52,30 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn find_message_end(&mut self) -> usize {
+        loop {
+            match self.next_token() {
+                Ok(token) => match token.kind() {
+                    TokenKind::EndOfMessage => return (token.start() + token.length()) as usize,
+                    _ => {}
+                },
+                Err(err) => return err.end,
+            }
+        }
+    }
+
     fn next_token(&mut self) -> Result<Token, ParserError> {
         self.next()
             .ok_or_else(|| match self.current.kind() == TokenKind::Invalid {
                 true => ParserError {
                     offset: self.current.start() as usize,
                     kind: ParserErrorKind::InvalidToken,
+                    end: (self.current.start() + self.current.length()) as usize,
                 },
                 false => ParserError {
                     offset: self.current.start() as usize,
                     kind: ParserErrorKind::MissingEndOfMessage,
+                    end: (self.current.start() + self.current.length()) as usize,
                 },
             })
     }
@@ -96,6 +111,7 @@ impl<'a> Parser<'a> {
             return Err(ParserError {
                 offset: self.current.start() as usize,
                 kind: ParserErrorKind::ExpectedToken(TokenKind::EndOfMessage),
+                end: self.find_message_end(),
             });
         }
 
@@ -115,6 +131,7 @@ impl<'a> Parser<'a> {
             return Err(ParserError {
                 offset: self.current.start() as usize,
                 kind: ParserErrorKind::ExpectedToken(TokenKind::At),
+                end: self.find_message_end(),
             });
         }
         let start_token = self.next_token()?;
@@ -131,6 +148,7 @@ impl<'a> Parser<'a> {
             return Err(ParserError {
                 offset: self.current.start() as usize,
                 kind: ParserErrorKind::ExpectedToken(TokenKind::Space),
+                end: self.find_message_end(),
             });
         }
 
@@ -200,6 +218,7 @@ impl<'a> Parser<'a> {
             return Err(ParserError {
                 offset: self.current.start() as usize,
                 kind: ParserErrorKind::ExpectedToken(TokenKind::Colon),
+                end: self.find_message_end(),
             });
         }
         let start_token = self.next_token()?;
@@ -220,6 +239,7 @@ impl<'a> Parser<'a> {
             return Err(ParserError {
                 offset: self.current.start() as usize,
                 kind: ParserErrorKind::ExpectedToken(TokenKind::Space),
+                end: self.find_message_end(),
             });
         }
 
@@ -235,6 +255,7 @@ impl<'a> Parser<'a> {
             return Err(ParserError {
                 offset: self.current.start() as usize,
                 kind: ParserErrorKind::UnexpectedToken,
+                end: self.find_message_end(),
             });
         }
         let start_token = self.next_token()?;
@@ -251,6 +272,7 @@ impl<'a> Parser<'a> {
                     return Err(ParserError {
                         offset: self.current.start() as usize,
                         kind: ParserErrorKind::UnexpectedToken,
+                        end: self.find_message_end(),
                     })
                 }
                 _ => {
@@ -296,10 +318,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn get_required_param(&self, param_ids: &mut Vec<NodeId>) -> Result<NodeId, ParserError> {
+    fn get_required_param(&mut self, param_ids: &mut Vec<NodeId>) -> Result<NodeId, ParserError> {
         param_ids.pop().ok_or(ParserError {
             offset: self.current.start() as usize,
             kind: ParserErrorKind::MissingCommand,
+            end: self.find_message_end(),
         })
     }
 
@@ -328,13 +351,14 @@ impl<'a> Parser<'a> {
         param_ids.reverse();
 
         match command_str.as_slice() {
-            strings::PING => Ok(self.store_node(
-                NodeKind::CommandPing {
-                    token: self.get_required_param(&mut param_ids)?,
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
+            strings::PING => {
+                let token = self.get_required_param(&mut param_ids)?;
+                Ok(self.store_node(
+                    NodeKind::CommandPing { token },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
             strings::PONG => {
                 let param1 = self.get_required_param(&mut param_ids)?;
                 match self.get_optional_param(&mut param_ids) {
@@ -357,38 +381,50 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            strings::CAP => Ok(self.store_node(
-                NodeKind::CommandCap {
-                    subcommand: self.get_required_param(&mut param_ids)?,
-                    capabilities: param_ids.pop(),
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
-            strings::PASS => Ok(self.store_node(
-                NodeKind::CommandPass {
-                    password: self.get_required_param(&mut param_ids)?,
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
-            strings::NICK => Ok(self.store_node(
-                NodeKind::CommandNick {
-                    nickname: self.get_required_param(&mut param_ids)?,
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
-            strings::USER => Ok(self.store_node(
-                NodeKind::CommandUser {
-                    user: self.get_required_param(&mut param_ids)?,
-                    mode: self.get_required_param(&mut param_ids)?,
-                    unused: self.get_required_param(&mut param_ids)?,
-                    realname: self.get_required_param(&mut param_ids)?,
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
+            strings::CAP => {
+                let subcommand = self.get_required_param(&mut param_ids)?;
+                Ok(self.store_node(
+                    NodeKind::CommandCap {
+                        subcommand,
+                        capabilities: param_ids.pop(),
+                    },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+            strings::PASS => {
+                let password = self.get_required_param(&mut param_ids)?;
+                Ok(self.store_node(
+                    NodeKind::CommandPass { password },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+            strings::NICK => {
+                let nickname = self.get_required_param(&mut param_ids)?;
+                Ok(self.store_node(
+                    NodeKind::CommandNick { nickname },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+            strings::USER => {
+                let user = self.get_required_param(&mut param_ids)?;
+                let mode = self.get_required_param(&mut param_ids)?;
+                let unused = self.get_required_param(&mut param_ids)?;
+                let realname = self.get_required_param(&mut param_ids)?;
+
+                Ok(self.store_node(
+                    NodeKind::CommandUser {
+                        user,
+                        mode,
+                        unused,
+                        realname,
+                    },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
             strings::QUIT => Ok(self.store_node(
                 NodeKind::CommandQuit {
                     reason: param_ids.pop(),
@@ -397,79 +433,97 @@ impl<'a> Parser<'a> {
                 self.current.start() - start_token.start(),
             )),
 
-            strings::JOIN => Ok(self.store_node(
-                NodeKind::CommandJoin {
-                    channels: self.get_required_param(&mut param_ids)?,
-                    keys: param_ids.pop(),
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
-            strings::PRIVMSG => Ok(self.store_node(
-                NodeKind::CommandPrivMsg {
-                    targets: self.get_required_param(&mut param_ids)?,
-                    text: self.get_required_param(&mut param_ids)?,
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
+            strings::JOIN => {
+                let channels = self.get_required_param(&mut param_ids)?;
+                Ok(self.store_node(
+                    NodeKind::CommandJoin {
+                        channels,
+                        keys: param_ids.pop(),
+                    },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+            strings::PRIVMSG => {
+                let targets = self.get_required_param(&mut param_ids)?;
+                let text = self.get_required_param(&mut param_ids)?;
+                Ok(self.store_node(
+                    NodeKind::CommandPrivMsg { targets, text },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
 
-            strings::RPL_WELCOME => Ok(self.store_node(
-                NodeKind::RplWelcome {
-                    client: self.get_required_param(&mut param_ids)?,
-                    text: self.get_required_param(&mut param_ids)?,
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
-            strings::RPL_YOURHOST => Ok(self.store_node(
-                NodeKind::RplYourhost {
-                    client: self.get_required_param(&mut param_ids)?,
-                    text: self.get_required_param(&mut param_ids)?,
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
-            strings::RPL_CREATED => Ok(self.store_node(
-                NodeKind::RplCreated {
-                    client: self.get_required_param(&mut param_ids)?,
-                    text: self.get_required_param(&mut param_ids)?,
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
-            strings::RPL_MYINFO => Ok(self.store_node(
-                NodeKind::RplMyinfo {
-                    client: self.get_required_param(&mut param_ids)?,
-                    servername: self.get_required_param(&mut param_ids)?,
-                    version: self.get_required_param(&mut param_ids)?,
-                    user_modes: self.get_required_param(&mut param_ids)?,
-                    channel_modes: self.get_required_param(&mut param_ids)?,
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
+            strings::RPL_WELCOME => {
+                let client = self.get_required_param(&mut param_ids)?;
+                let text = self.get_required_param(&mut param_ids)?;
+                Ok(self.store_node(
+                    NodeKind::RplWelcome { client, text },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+            strings::RPL_YOURHOST => {
+                let client = self.get_required_param(&mut param_ids)?;
+                let text = self.get_required_param(&mut param_ids)?;
+                Ok(self.store_node(
+                    NodeKind::RplYourhost { client, text },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+            strings::RPL_CREATED => {
+                let client = self.get_required_param(&mut param_ids)?;
+                let text = self.get_required_param(&mut param_ids)?;
+                Ok(self.store_node(
+                    NodeKind::RplCreated { client, text },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+            strings::RPL_MYINFO => {
+                let client = self.get_required_param(&mut param_ids)?;
+                let servername = self.get_required_param(&mut param_ids)?;
+                let version = self.get_required_param(&mut param_ids)?;
+                let user_modes = self.get_required_param(&mut param_ids)?;
+                let channel_modes = self.get_required_param(&mut param_ids)?;
 
-            strings::ERR_PASSWDMISMATCH => Ok(self.store_node(
-                NodeKind::ErrPasswdmismatch {
-                    client: self.get_required_param(&mut param_ids)?,
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
+                Ok(self.store_node(
+                    NodeKind::RplMyinfo {
+                        client,
+                        servername,
+                        version,
+                        user_modes,
+                        channel_modes,
+                    },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
 
-            strings::ERR_NICKNAMEINUSE => Ok(self.store_node(
-                NodeKind::ErrNicknameinuse {
-                    client: self.get_required_param(&mut param_ids)?,
-                    nick: self.get_required_param(&mut param_ids)?,
-                },
-                start_token.start(),
-                self.current.start() - start_token.start(),
-            )),
+            strings::ERR_PASSWDMISMATCH => {
+                let client = self.get_required_param(&mut param_ids)?;
+                Ok(self.store_node(
+                    NodeKind::ErrPasswdmismatch { client },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
+
+            strings::ERR_NICKNAMEINUSE => {
+                let client = self.get_required_param(&mut param_ids)?;
+                let nick = self.get_required_param(&mut param_ids)?;
+                Ok(self.store_node(
+                    NodeKind::ErrNicknameinuse { client, nick },
+                    start_token.start(),
+                    self.current.start() - start_token.start(),
+                ))
+            }
 
             _ => Err(ParserError {
                 offset: start_token.start() as usize,
                 kind: ParserErrorKind::MissingCommand,
+                end: self.find_message_end(),
             }),
         }
     }

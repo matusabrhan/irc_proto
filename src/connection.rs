@@ -40,10 +40,7 @@ impl IrcDecoder {
     fn decode(&mut self) -> Result<Option<Message>, ParserError> {
         match Message::new(&self.buffer[self.cursor as usize..self.length as usize]) {
             Ok(message) => {
-                self.buffer
-                    .copy_within(self.cursor as usize..self.length as usize, 0);
-                self.cursor = 0;
-                self.length -= message.contents().len() as u16;
+                self.cursor += message.contents().len() as u16;
                 Ok(Some(message))
             }
             Err(err) => match err.kind {
@@ -61,7 +58,7 @@ impl IrcDecoder {
                     Ok(None)
                 }
                 _ => {
-                    self.cursor += err.offset as u16;
+                    self.cursor += err.end as u16;
                     Err(err)
                 }
             },
@@ -528,14 +525,14 @@ mod tests {
         let (mut server, _) = listener.accept().await.unwrap();
         let mut client = Transport::new(stream);
 
-        server.write_all(b"PRIVMSG #chan Hello\r\n").await.unwrap();
-        server.write_all(b"PRIVMSG #chan Hello\r\n").await.unwrap();
+        server.write_all(b"PRIVMSG #chan Hello1\r\n").await.unwrap();
+        server.write_all(b"PRIVMSG #chan Hello2\r\n").await.unwrap();
 
         let mut msg = String::new();
         msg.push_str(client.read().await.unwrap().contents());
         msg.push_str(client.read().await.unwrap().contents());
 
-        assert_eq!("PRIVMSG #chan Hello\r\nPRIVMSG #chan Hello\r\n", msg);
+        assert_eq!("PRIVMSG #chan Hello1\r\nPRIVMSG #chan Hello2\r\n", msg);
         client.close().await.unwrap();
         server.shutdown().await.unwrap();
     }
@@ -563,6 +560,29 @@ mod tests {
             "PRIVMSG #chan Hello\r\n",
             client.read().await.unwrap().contents(),
         );
+        client.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_transport_read4() {
+        let (listener, _) = start_listen().await;
+        let stream = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        let mut client = Transport::new(stream);
+
+        server
+            .write_all(b"PRIVMSG #chan Hello\r\nINVALID\r\nPING token\r\n")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            "PRIVMSG #chan Hello\r\n",
+            client.read().await.unwrap().contents(),
+        );
+        assert!(client.read().await.is_err());
+        assert_eq!("PING token\r\n", client.read().await.unwrap().contents(),);
         client.close().await.unwrap();
     }
 
