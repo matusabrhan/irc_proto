@@ -40,17 +40,17 @@ impl IrcDecoder {
     fn decode(&mut self) -> Result<Option<Message>, ParserError> {
         match Message::new(&self.buffer[self.cursor as usize..self.length as usize]) {
             Ok(message) => {
-                self.cursor += message.contents().len() as u16;
+                let message_len = message.contents().len() as u16;
+                self.buffer.copy_within(
+                    (self.cursor + message_len) as usize..self.length as usize,
+                    0,
+                );
+                self.cursor = 0;
+                self.length -= message_len;
                 Ok(Some(message))
             }
             Err(err) => match err.kind {
                 ParserErrorKind::MissingEndOfMessage => {
-                    if self.cursor > 0 {
-                        self.buffer
-                            .copy_within(self.cursor as usize..self.length as usize, 0);
-                        self.length -= self.cursor;
-                        self.cursor = 0
-                    }
                     if self.length as usize >= MAX_MESSAGE_SIZE {
                         self.cursor = self.length;
                         return Err(err);
