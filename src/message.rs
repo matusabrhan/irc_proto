@@ -228,10 +228,7 @@ pub struct MessageBuilder<'a> {
 impl Message {
     pub fn new(input: &[u8]) -> Result<Self, ParserError> {
         let mut parser = Parser::new(input);
-        let root_id = match parser.parse_message() {
-            Ok(root) => root,
-            Err(err) => return Err(err),
-        };
+        let root_id = parser.parse_message()?;
         let nodes = Nodes(parser.get_nodes());
         let root_node = nodes.index(root_id);
 

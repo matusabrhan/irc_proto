@@ -55,10 +55,11 @@ impl<'a> Parser<'a> {
     fn find_message_end(&mut self) -> usize {
         loop {
             match self.next_token() {
-                Ok(token) => match token.kind() {
-                    TokenKind::EndOfMessage => return (token.start() + token.length()) as usize,
-                    _ => {}
-                },
+                Ok(token) => {
+                    if let TokenKind::EndOfMessage = token.kind() {
+                        return (token.start() + token.length()) as usize;
+                    }
+                }
                 Err(err) => return err.end,
             }
         }
