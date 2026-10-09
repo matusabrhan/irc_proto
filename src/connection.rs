@@ -1,12 +1,20 @@
-#[cfg(feature = "std-stream")]
+#[cfg(feature = "sync-transport")]
 use std::io::{Read, Write};
 
-#[cfg(feature = "tokio-stream")]
+#[cfg(feature = "async-transport")]
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{broadcast, mpsc},
     task::JoinHandle,
 };
+
+#[cfg(feature = "async-connection-stream")]
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
+#[cfg(feature = "async-connection-stream")]
+use tokio_stream::Stream;
 
 use crate::parser::ParserErrorKind;
 use crate::IrcError;
@@ -122,7 +130,7 @@ impl<S> Transport<S> {
     }
 }
 
-#[cfg(feature = "std-stream")]
+#[cfg(feature = "sync-transport")]
 impl<S: Read + Write + Unpin> Transport<S> {
     pub fn read(&mut self) -> Result<Message, IrcError> {
         if !self.decoder.has_remaining() {
@@ -177,7 +185,7 @@ impl<S: Read + Write + Unpin> Transport<S> {
     }
 }
 
-#[cfg(feature = "tokio-stream")]
+#[cfg(feature = "async-transport")]
 impl<S: AsyncReadExt + AsyncWriteExt + Unpin> Transport<S> {
     pub async fn read(&mut self) -> Result<Message, IrcError> {
         if !self.decoder.has_remaining() {
@@ -235,7 +243,7 @@ impl<S: AsyncReadExt + AsyncWriteExt + Unpin> Transport<S> {
     }
 }
 
-#[cfg(feature = "tokio-stream")]
+#[cfg(feature = "async-transport")]
 #[derive(Debug)]
 pub enum IrcEvent {
     Message(Message),
@@ -243,7 +251,8 @@ pub enum IrcEvent {
     Closed,
 }
 
-#[cfg(feature = "tokio-stream")]
+#[cfg(feature = "async-transport")]
+#[derive(Debug)]
 pub struct Connection {
     handle: JoinHandle<()>,
     tx: mpsc::Sender<Message>,
@@ -251,7 +260,7 @@ pub struct Connection {
     cancel: broadcast::Sender<()>,
 }
 
-#[cfg(feature = "tokio-stream")]
+#[cfg(feature = "async-transport")]
 impl Connection {
     pub fn start(stream: tokio::net::TcpStream, channel_size: usize) -> Self {
         let (cancel_tx, mut cancel_rx) = broadcast::channel(1);
@@ -314,7 +323,7 @@ impl Connection {
     }
 }
 
-#[cfg(feature = "std-stream")]
+#[cfg(feature = "sync-transport")]
 #[cfg(test)]
 mod tests {
     use std::{
@@ -424,7 +433,22 @@ mod tests {
     }
 }
 
-#[cfg(feature = "tokio-stream")]
+impl Stream for Connection {
+    type Item = IrcEvent;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // `UnboundedReceiver::poll_recv` is available on pinned receiver.
+        let this = self.get_mut();
+
+        match Pin::new(&mut this.rx).poll_recv(cx) {
+            Poll::Ready(Some(msg)) => Poll::Ready(Some(msg)),
+            Poll::Ready(None) => Poll::Ready(None), // channel closed
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+#[cfg(feature = "async-transport")]
 #[cfg(test)]
 mod tests {
     use super::Transport;

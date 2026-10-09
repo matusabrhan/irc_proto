@@ -7,11 +7,11 @@ pub mod message;
 pub mod parser;
 pub mod token;
 
-#[cfg(all(feature = "std-stream", feature = "tokio-stream"))]
-compile_error!("features `std-stream` and `tokio-stream` are mutually exclusive");
+#[cfg(all(feature = "sync-transport", feature = "async-transport"))]
+compile_error!("features `sync-transport` and `async-transport` are mutually exclusive");
 
-#[cfg(not(any(feature = "std-stream", feature = "tokio-stream")))]
-compile_error!("enable either `std-stream` or `tokio-stream`");
+#[cfg(not(any(feature = "sync-transport", feature = "async-transport")))]
+compile_error!("enable either `sync-transport` or `async-transport`");
 
 #[derive(Debug)]
 pub enum IrcError {
