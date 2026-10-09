@@ -236,6 +236,7 @@ impl<S: AsyncReadExt + AsyncWriteExt + Unpin> Transport<S> {
 }
 
 #[cfg(feature = "tokio-stream")]
+#[derive(Debug)]
 pub enum IrcEvent {
     Message(Message),
     Error(IrcError),
@@ -363,7 +364,6 @@ mod tests {
 
     #[test]
     fn test_transport_write1() {
-        enable_logging();
         let (listener, _) = start_listen();
         let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (mut server, _) = listener.accept().unwrap();
