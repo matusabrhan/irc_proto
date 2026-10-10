@@ -248,7 +248,6 @@ impl<S: AsyncReadExt + AsyncWriteExt + Unpin> Transport<S> {
 pub enum IrcEvent {
     Message(Message),
     Error(IrcError),
-    Closed,
 }
 
 #[cfg(feature = "async-transport")]
@@ -274,10 +273,10 @@ impl Connection {
                     msg = transport.read() => {
                         match msg {
                             Ok(msg) => {
-                                sink_tx.send(IrcEvent::Message(msg)).await.ok();
+                                if sink_tx.send(IrcEvent::Message(msg)).await.is_err() {break}
                             }
                             Err(err) => {
-                                sink_tx.send(IrcEvent::Error(err)).await.ok();
+                                if sink_tx.send(IrcEvent::Error(err)).await.is_err() {break}
                             },
                         }
                     }
@@ -289,11 +288,10 @@ impl Connection {
                                     sink_tx.send(IrcEvent::Error(err)).await.ok();
                                 }
                             }
-                            None => {
-                                sink_tx.send(IrcEvent::Closed).await.ok();
-                            },
+                            None => break,
                         }
                     }
+
                     _ = cancel_rx.recv() => break,
                 }
             }
@@ -433,6 +431,7 @@ mod tests {
     }
 }
 
+#[cfg(feature = "async-connection-stream")]
 impl Stream for Connection {
     type Item = IrcEvent;
 
